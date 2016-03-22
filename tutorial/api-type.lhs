@@ -3,8 +3,8 @@ title: A web API as a type
 toc: true
 ---
 
-The source for this tutorial section is a literate haskell file, so first we
-need to have some language extensions and imports:
+この章のソースは literate haskell file です。
+まずいくつかの言語拡張と import を導入します。
 
 > {-# LANGUAGE DataKinds #-}
 > {-# LANGUAGE TypeOperators #-}
@@ -16,18 +16,17 @@ need to have some language extensions and imports:
 
 Consider the following informal specification of an API:
 
- > The endpoint at `/users` expects a GET request with query string parameter
- > `sortby` whose value can be one of `age` or `name` and returns a
- > list/array of JSON objects describing users, with fields `age`, `name`,
- > `email`, `registration_date`".
+以下のように大雑把にAPIの仕様を考えてみましょう。
 
-You *should* be able to formalize that. And then use the formalized version to
-get you much of the way towards writing a web app. And all the way towards
-getting some client libraries, and documentation (and in the future, who knows
-- tests, HATEOAS, ...).
+ > `/users` というエンドポイントは `age` や `name` などの値を持つ `sortby`
+ > クエリ文字列を受け取り、`age`, `name`, `email`, `registration_date` といった
+ > ユーザ情報を持つJSONオブジェクトの一覧を返します。
 
-How would we describe it with servant? As mentioned earlier, an endpoint
-description is a good old Haskell **type**:
+これを形式化してみましょう。形式化されたAPIからウェブアプリを書くための多くの手段を得られます。
+他にもクライアントライブラリやドキュメントを書く手段にもなります。
+
+それでは sevant を使ってどのようにAPIを記述すれば良いのでしょうか？
+前述のとおりエンドポイントを書くには古き良き Haskell の **型** を使います。
 
 > type UserAPI = "users" :> QueryParam "sortby" SortBy :> Get '[JSON] [User]
 >
@@ -38,35 +37,31 @@ description is a good old Haskell **type**:
 >   age :: Int
 > }
 
-Let's break that down:
+上記を掘り下げてみましょう:
 
-- `"users"` says that our endpoint will be accessible under `/users`;
-- `QueryParam "sortby" SortBy`, where `SortBy` is defined by `data SortBy = Age
-| Name`, says that the endpoint has a query string parameter named `sortby`
-whose value will be extracted as a value of type `SortBy`.
-- `Get '[JSON] [User]` says that the endpoint will be accessible through HTTP
-GET requests, returning a list of users encoded as JSON. You will see
-later how you can make use of this to make your data available under different
-formats, the choice being made depending on the [Accept
-header](http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html) specified in
-the client's request.
-- the `:>` operator that separates the various "combinators" just lets you
-sequence static path fragments, URL captures and other combinators. The
-ordering only matters for static path fragments and URL captures. `"users" :>
-"list-all" :> Get '[JSON] [User]`, equivalent to `/users/list-all`, is
-obviously not the same as `"list-all" :> "users" :> Get '[JSON] [User]`, which
-is equivalent to `/list-all/users`. This means that sometimes `:>` is somehow
-equivalent to `/`, but sometimes it just lets you chain another combinator.
+- `"users"` は `/users` でアクセスできるエンドポイントを表しています。
+- `QueryParam "sortby" SortBy` は `sortby` クエリ文字列パラメータを持つ
+エンドポイントであり、`SortBy` 型の値を持つことが期待されます。
+`SortBy` は `data SortBy = Age | Name` のように定義されます。
+- `Get '[JSON] [User]` は HTTP GET リクエストを通じてアクセスできる、
+JSONとしてUserのリストを返すようなエンドポイントであることを示しています。
+異なるフォーマットでデータを使えるようにする方法は後ほど登場します。それは
+クライアントのリクエスト内でどの [Accept header](http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html)
+を選ぶかで決まります。
+- `:>` 演算子は様々な「結合子」を分離します。static path や URL capture など。
+static path や URL capture の場合だけ、その順序に意味があります。
+`"users" :> "list-all" :> Get '[JSON] [User]` は `/users/list-all` と同じで、
+`"list-all" :> "users" :> Get '[JSON] [User]` とは異なります。
+`:>` は `/` と等価な場合もありますが、必ずしもそうではないこともあります。
 
-We can also describe APIs with multiple endpoints by using the `:<|>`
-combinators. Here's an example:
+複数のエンドポイントを持つAPIを `:<|>` 結合子を使って記述できます。
+以下に一例を示します：
 
 > type UserAPI2 = "users" :> "list-all" :> Get '[JSON] [User]
 >            :<|> "list-all" :> "users" :> Get '[JSON] [User]
 
-*servant* provides a fair amount of combinators out-of-the-box, but you can
-always write your own when you need it. Here's a quick overview of all the
-combinators that servant comes with.
+*servant* は多数の（out-of-the-box?）結合子を取り扱えますが、必要なだけ自分で書かなければ
+なりません。servant で扱えるすべての結合子の概要を以下にまとめました。
 
 Combinators
 ===========
@@ -74,19 +69,19 @@ Combinators
 Static strings
 --------------
 
-As you've already seen, you can use type-level strings (enabled with the
-`DataKinds` language extension) for static path fragments. Chaining
-them amounts to `/`-separating them in a URL.
+これまでに見てきた通り、static path を記述するのに型レベル文字列を使用できます。
+(ただし、`DataKinds` 言語拡張を導入する必要があります。)
+URL を書くには文字列を `/` で句切れば良いのです。
 
 > type UserAPI3 = "users" :> "list-all" :> "now" :> Get '[JSON] [User]
->               -- describes an endpoint reachable at:
+>               -- これでアクセスできるエンドポイントは以下のようになります:
 >               -- /users/list-all/now
 
 `Delete`, `Get`, `Patch`, `Post` and `Put`
 ------------------------------------------
 
-These 5 combinators are very similar except that they each describe a
-different HTTP method. This is how they're declared
+これら5つの結合子は非常に似ていますが、HTTPメソッドが異なります。
+以下のように定義されています。
 
 ``` haskell
 data Delete (contentTypes :: [*]) a
@@ -96,8 +91,8 @@ data Post (contentTypes :: [*]) a
 data Put (contentTypes :: [*]) a
 ```
 
-An endpoint ends with one of the 5 combinators above (unless you write your
-own). Examples:
+エンドポイントは(自作しないかぎり)上記の5つの結合子のうちの1つで終わります。
+例: 
 
 > type UserAPI4 = "users" :> Get '[JSON] [User]
 >            :<|> "admins" :> Get '[JSON] [User]
@@ -105,35 +100,31 @@ own). Examples:
 `Capture`
 ---------
 
-URL captures are parts of the URL that are variable and whose actual value is
-captured and passed to the request handlers. In many web frameworks, you'll see
-it written as in `/users/:userid`, with that leading `:` denoting that `userid`
-is just some kind of variable name or placeholder. For instance, if `userid` is
-supposed to range over all integers greater or equal to 1, our endpoint will
-match requests made to `/users/1`, `/users/143` and so on.
+URLの一部であるURLキャプチャは変数で、その実際の値は取得されてからリクエストハンドラに渡されます。
+多くのウェブフレームワークでは `/users/:userid` のように書かれ、`:` のついた `userid` が変数名
+またはプレースホルダです。例えば、もし `userid` が1以上の整数の範囲に収まるの場合には、そのエンド
+ポイントは `/users/1` とか `/users/143` とかになります。
 
-The `Capture` combinator in servant takes a (type-level) string representing
-the "name of the variable" and a type, which indicates the type we want to
-decode the "captured value" to.
+Servant における `Capture` 結合子は変数名と型で表される(型レベル)文字列で、取得したい値の
+型を示しています。
 
 ``` haskell
 data Capture (s :: Symbol) a
--- s :: Symbol just says that 's' must be a type-level string.
+-- s :: シンボル 's' は型レベル文字列
 ```
 
-In some web frameworks, you use regexes for captures. We use a
-[`FromText`](https://hackage.haskell.org/package/servant/docs/Servant-Common-Text.html#t:FromText)
-class, which the captured value must be an instance of.
+キャプチャに正規表現を使っているウェブフレームワークもあります。
+Servant は [`FromText`](https://hackage.haskell.org/package/servant/docs/Servant-Common-Text.html#t:FromText)
+クラスを使っていて、取得された値はそのインスタンスになっていなければなりません。
 
-Examples:
+例:
 
 > type UserAPI5 = "user" :> Capture "userid" Integer :> Get '[JSON] User
->                 -- equivalent to 'GET /user/:userid'
->                 -- except that we explicitly say that "userid"
->                 -- must be an integer
+>                 -- 'GET /user/:userid' と等価
+>                 -- ただし servant では "userid" が Integer であることを明示している
 >
 >            :<|> "user" :> Capture "userid" Integer :> Delete '[] ()
->                 -- equivalent to 'DELETE /user/:userid'
+>                 -- 'DELETE /user/:userid' と等価
 
 `QueryParam`, `QueryParams`, `QueryFlag`, `MatrixParam`, `MatrixParams` and `MatrixFlag`
 ----------------------------------------------------------------------------------------
