@@ -129,20 +129,17 @@ Servant は [`FromText`](https://hackage.haskell.org/package/servant/docs/Servan
 `QueryParam`, `QueryParams`, `QueryFlag`, `MatrixParam`, `MatrixParams` and `MatrixFlag`
 ----------------------------------------------------------------------------------------
 
-`QueryParam`, `QueryParams` and `QueryFlag` are about query string
-parameters, i.e., those parameters that come after the question mark
-(`?`) in URLs, like `sortby` in `/users?sortby=age`, whose value is
-set to `age`. `QueryParams` lets you specify that the query parameter
-is actually a list of values, which can be specified using
-`?param[]=value1&param[]=value2`. This represents a list of values
-composed of `value1` and `value2`. `QueryFlag` lets you specify a
-boolean-like query parameter where a client isn't forced to specify a
-value. The absence or presence of the parameter's name in the query
-string determines whether the parameter is considered to have the
-value `True` or `False`. For instance, `/users?active` would list only
-active users whereas `/users` would list them all.
+`QueryParam` や `QueryParams`, `QueryFlag` はクエリ文字列パラメータです。
+これらのパラメータは URL 内の (`?`) の後に置かれます。
+例えば、`/users?sortby=age` の `sortby` のようなもので `age` という値を取ります。
+`QueryParams` はクエリパラメータが値のリストであることを表していて、
+`?param[]=value1&param[]=value2` のように書かれます。 
+`QueryFlag` は論理値のようなクエリパラメータに用いられ、値を持つ必要はありません。
+クエリ文字列の中でパラメータ名があるかないかで、パラメータの値が `True` か `False`
+であるかを決定します。例えば、`/users?active` はすべての `/users` のうち、
+アクティブなユーザの一覧のみを表します。
 
-Here are the corresponding data type declarations:
+以下に対応するデータ型の定義を示します:
 
 ``` haskell
 data QueryParam (sym :: Symbol) a
@@ -151,16 +148,15 @@ data QueryFlag (sym :: Symbol)
 ```
 
 [Matrix parameters](http://www.w3.org/DesignIssues/MatrixURIs.html)
-are similar to query string parameters, but they can appear anywhere
-in the paths (click the link for more details). A URL with matrix
-parameters in it looks like `/users;sortby=age`, as opposed to
-`/users?sortby=age` with query string parameters. The big advantage is
-that they are not necessarily at the end of the URL. You could have
-`/users;active=true;registered_after=2005-01-01/locations` to get
-geolocation data about users whom are still active and registered
-after *January 1st, 2005*.
+はクエリ文字列パラメータに近いものですが、パスの至るところに出てきます。
+matrixパラメータのURLは `/users;sortby=age` のようになり、
+クエリ文字列パラメータでは `/users?sortby=age` のように書けます。
+このパラメータのいいところは、URLの最後に持ってくる必要がないことです。
+2015/01/01 以降に登録したアクティブユーザの位置データを取得するには、
+`/users;active=true;registered_after=2005-01-01/locations` 
+のように書きます。
 
-Corresponding data type declarations below.
+対応するデータ型定義は以下のとおりです:
 
 ``` haskell
 data MatrixParam (sym :: Symbol) a
@@ -168,40 +164,40 @@ data MatrixParams (sym :: Symbol) a
 data MatrixFlag (sym :: Symbol)
 ```
 
-Examples:
+例:
 
 > type UserAPI6 = "users" :> QueryParam "sortby" SortBy :> Get '[JSON] [User]
->                 -- equivalent to 'GET /users?sortby={age, name}'
+>                 -- 'GET /users?sortby={age, name}' と同じ
 >
 >            :<|> "users" :> MatrixParam "sortby" SortBy :> Get '[JSON] [User]
->                 -- equivalent to 'GET /users;sortby={age, name}'
+>                 -- 'GET /users;sortby={age, name}' と同じ
 
-Again, your handlers don't have to deserialize these things (into, for example,
-a `SortBy`). *servant* takes care of it.
+繰り返しになりますが、ハンドラが `SortBy` のようなものを処理する必要はありません。
+*Servant* が面倒を見てくれます。
 
 `ReqBody`
 ---------
 
-Each HTTP request can carry some additional data that the server can use in its
-*body*, and this data can be encoded in any format -- as long as the server
-understands it. This can be used for example for an endpoint for creating new
-users: instead of passing each field of the user as a separate query string
-parameter or something dirty like that, we can group all the data into a JSON
-object. This has the advantage of supporting nested objects.
+個々のHTTPリクエストは使用可能なサーバについてのデータを *body* に持つことができ、
+そのデータは(サーバが理解する長さで)任意のフォーマットにエンコードできます。
+それは新しいユーザを作成するのに使うエンドポイントなどで使われます。
+分離したクエリ文字列パラメータみたいな汚い書式でユーザの個々のフィールドを得る
+代わりに、すべてのデータをJSONオブジェクトに入れてしまうことができます。
+この利点はネストされたオブジェクトを扱えることです。
 
-*servant*'s `ReqBody` combinator takes a list of content types in which the
-data encoded in the request body can be represented and the type of that data.
-And, as you might have guessed, you don't have to check the content-type
-header, and do the deserialization yourself. We do it for you. And return `Bad
-Request` or `Unsupported Content Type` as appropriate.
+*Servant* の `ReqBody` 結合子は content-type のリストを持ち、エンコードされた
+そのデータとデータ型はリクエストボディに書かれます。気づいたかもしれませんが、
+content-type ヘッダーをチェックする必要はなく、自前で処理する必要もありません。
+servant が面倒をみます。そして必要に応じて `Bad Request` や `Unsupported Content Type`
+を返します。
 
-Here's the data type declaration for it:
+以下はデータ型の定義です:
 
 ``` haskell
 data ReqBody (contentTypes :: [*]) a
 ```
 
-Examples:
+例:
 
 > type UserAPI7 = "users" :> ReqBody '[JSON] User :> Post '[JSON] User
 >                 -- - equivalent to 'POST /users' with a JSON object
@@ -218,82 +214,80 @@ Examples:
 Request `Header`s
 -----------------
 
-Request headers are used for various purposes, from caching to carrying
-auth-related data. They consist of a header name and an associated value. An
-example would be `Accept: application/json`.
+リクエストヘッダはキャッシュから認証データの受け渡しまで様々な用途に使われます。リクエスト
+ヘッダはヘッダ名とその値を持ちます。例えば、`Accept: application/json` のように書き
+ます。
 
-The `Header` combinator in servant takes a type-level string for the header
-name and the type to which we want to decode the header's value (from some
-textual representation), as illustrated below:
+Servant の `Header` 結合子はヘッダ名とその型を型レベル文字列で表します。型は(何らかの
+文字表現から変換される)ヘッダ値の型で、以下のように書けます。
 
 ``` haskell
 data Header (sym :: Symbol) a
 ```
 
-Here's an example where we declare that an endpoint makes use of the
-`User-Agent` header which specifies the name of the software/library used by
-the client to send the request.
+以下の例は `User-Agent` を使ったエンドポイントを表しています。リクエストを送信する
+クライアントが使うソフトウェアまたはライブラリの名前を示します。
 
 > type UserAPI8 = "users" :> Header "User-Agent" Text :> Get '[JSON] [User]
 
 Content types
 -------------
 
-So far, whenever we have used a combinator that carries a list of content
-types, we've always specified `'[JSON]`. However, *servant* lets you use several
-content types, and also lets you define your own content types.
+これまでは content-type のリストを扱う結合子として常に `'[JSON]` を使ってきました。
+しかし *servant* は他にも content-type を使えますし、自前の content-type を定義する
+こともできます。
 
-Four content-types are provided out-of-the-box by the core *servant* package:
-`JSON`, `PlainText`, `FormUrlEncoded` and `OctetStream`. If for some obscure
-reason you wanted one of your endpoints to make your user data available under
-those 4 formats, you would write the API type as below:
+*Servant* パッケージはすぐに使える4つの content-type を用意しています。
+`JSON`, `PlainText`, `FormUrlEncoded`, `OctetStream` です。
+もし良く分からない理由で4つのフォーマットを使ってユーザデータを扱えるエンドポイントが必要に
+なった場合には、以下のように API を書きます。
 
 > type UserAPI9 = "users" :> Get '[JSON, PlainText, FormUrlEncoded, OctetStream] [User]
 
-We also provide an HTML content-type, but since there's no single library
-that everyone uses, we decided to release 2 packages, *servant-lucid* and
-*servant-blaze*, to provide HTML encoding of your data.
+HTML の content-type も提供されていますが、誰もが使う1つのライブラリとしては提供して
+いません。データを HTML にエンコードするために *servant-lucid* と *servant-blaze* 
+という2つのパッケージが用意されています。
 
-We will further explain how these content types and your data types can play
-together in the [section about serving an API](/tutorial/server.html).
+content-type と独自のデータ型を一緒に扱う方法は [section about serving an API](/tutorial/server.html)
+で紹介します。
 
 Response `Headers`
 ------------------
 
-Just like an HTTP request, the response generated by a webserver can carry
-headers too. *servant* provides a `Headers` combinator that carries a list of
-`Header` and can be used by simply wrapping the "return type" of an endpoint
-with it.
+HTTPリクエストと同じく、ウェブサーバに作られたレスポンスもヘッダを載せることができます。
+*servant* は `Header` のリストを渡す `Headers` 結合子を持ち、"return type" を
+単純にラップするエンドポイントによって使われます
 
 ``` haskell
 data Headers (ls :: [*]) a
 ```
 
-If you want to describe an endpoint that returns a "User-Count" header in each
-response, you could write it as below:
+レスポンスが "User-Count" ヘッダを返すようなエンドポイントは、以下のように書けます。
 
 > type UserAPI10 = "users" :> Get '[JSON] (Headers '[Header "User-Count" Integer] [User])
 
 Interoperability with other WAI `Application`s: `Raw`
 -----------------------------------------------------
 
-Finally, we also include a combinator named `Raw` that can be used for two reasons:
+最後に紹介するのは `Raw` 結合子で、以下の2つの理由で使用されます。
 
-- You want to serve static files from a given directory. In that case you can just say:
+- 静的なファイルを使いたい場合には、以下のように書きます。
 
 > type UserAPI11 = "users" :> Get '[JSON] [User]
->                  -- a /users endpoint
+>                  -- /users エンドポイント
 >
 >             :<|> Raw
->                  -- requests to anything else than /users
->                  -- go here, where the server will try to
->                  -- find a file with the right name
->                  -- at the right path
+>                  -- /users 以外のリクエストはここにきます。
+>                  -- 正しいパス名とファイル名を指定すれば表示されます。
 
 - You more generally want to plug a [WAI `Application`](http://hackage.haskell.org/package/wai)
 into your webservice. Static file serving is a specific example of that. The API type would look the
 same as above though. (You can even combine *servant* with other web frameworks
 this way!)
+
+- より一般的な使い方としてはウェブサービスに [WAI `Application`](http://hackage.haskell.org/package/wai)
+を取り入れる方法があります。静的なファイルを表示する方法が書いてあります。APIの場合と同じように見えます。
+(この方法で *servant* と他のウェブフレームワークを組み合わせることもできます。)
 
 <div style="text-align: center;">
   <a href="/tutorial/server.html">Next page: Serving an API</a>
