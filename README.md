@@ -11,11 +11,11 @@ $ dist/build/site/site watch
 # builds the site and serves it at localhost:8000
 # any changes to the content immediately regenerates the relevant parts of the website
 $ dist/build/site/site build && dist/build/site/site deploy
-# builds the site and commits/pushes the result to http://algas.github.io/haskell-servant.github.io/jp -- the 'gh-pages' branch of this repo
+# builds the site and commits/pushes the result to http://algas.github.io/haskell-servant.github.io -- the 'gh-pages' branch of this repo
 ```
 
 Original Document:  
 http://haskell-servant.github.io
 
 Japanese Translation:  
-http://algas.github.io/haskell-servant.github.io/jp
+http://algas.github.io/haskell-servant.github.io
