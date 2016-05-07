@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Extending servant - haskell-servant</title>
+        <link rel="stylesheet" type="text/css" href="./css/default.css" />
+    </head>
+    <body>
+        <div id="header">
+            <div id="logo">
+                <a href="./">servant</a>
+            </div>
+            <div id="navigation">
+                <a href="./">Home</a>
+                <a href="./blog.html">Blog</a>
+                <a href="./tutorial">Tutorial</a>
+                <a href="./tips.html">Tips and tricks</a>
+                <a href="./talks.html">Talks</a>
+                <a href="https://github.com/haskell-servant/servant">Github</a>
+            </div>
+        </div>
+
+        <div id="content">
+            <h1>Extending servant</h1>
+
+            <div id="toc"><h3>Table of contents</h3><ul>
+<li><a href="#new-combinators">New combinators</a></li>
+<li><a href="#new-interpreters">New Interpreters</a></li>
+<li><a href="#other-directions">Other Directions</a></li>
+</ul></div>
+<p>servant の最高な機能の1つは容易に拡張可能なことです。クライアントライブラリを生成したり認証や クッキーを扱うようなエクステンションやプラグインは一般に2つの軸に沿っています。1つは新しい結合子 を出すもの、もう1つは結合子を変換するものです。結合子をちょっとした “API DSL” として考えて みましょう。複数の変換が可能であることは深く織り込み済みです。</p>
+<p>2つの軸は servant を拡張する方法を駆使するというわけではなく一般的なやり方です。</p>
+<section id="new-combinators" class="level1">
+<h1>New combinators</h1>
+<p><code>Post</code>何とかのような結合子を加えることが目的だと仮定しましょう。この結合子は新規作成された リソースの場所を持つHTTP <a href="http://en.wikipedia.org/wiki/HTTP_location">Location</a> ヘッダでレスポンスを返します。</p>
+<p>初めにデータ型を定義します。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">PostWithLocation</span> a
+    <span class="kw">deriving</span> <span class="dt">Typeable</span></code></pre></div>
+<p>次に、これをどのように変換すべきでしょうか。変換はクラスのインスタンスによって定義されます。 例えば、サーバがどのように振る舞うかを定義したい時、<code>HasServer</code> クラスをインスタンス化します。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">import </span><span class="dt">Control.Monad.Trans.Either</span>
+<span class="kw">import </span><span class="dt">Data.Aeson</span>
+<span class="kw">import </span><span class="dt">Data.Proxy</span>
+<span class="kw">import </span><span class="dt">Data.String.Conversions</span>
+<span class="kw">import </span><span class="dt">Data.Typeable</span>
+<span class="kw">import </span><span class="dt">Network.HTTP.Types</span>
+<span class="kw">import </span><span class="dt">Network.Wai</span>
+<span class="kw">import </span><span class="dt">Servant.Server</span>
+
+<span class="kw">data</span> <span class="dt">Link</span> <span class="fu">=</span> <span class="dt">Link</span> <span class="dt">Ascii</span>
+
+<span class="kw">instance</span> <span class="dt">ToJSON</span> a <span class="ot">=&gt;</span> <span class="dt">HasServer</span> (<span class="dt">PostWithLocation</span> a) <span class="kw">where</span>
+  <span class="kw">type</span> <span class="dt">Server</span> (<span class="dt">PostWithLocation</span> a) <span class="fu">=</span> <span class="dt">EitherT</span> (<span class="dt">Int</span>, <span class="dt">String</span>) <span class="dt">IO</span> (<span class="dt">Link</span>, a)
+
+  route <span class="dt">Proxy</span> action request respond
+    <span class="fu">|</span> null (pathInfo request) <span class="fu">&amp;&amp;</span> requestMethod request <span class="fu">==</span> methodPost <span class="fu">=</span> <span class="kw">do</span>
+        e <span class="ot">&lt;-</span> runEitherT action
+        respond <span class="fu">.</span> succeedWith <span class="fu">$</span> <span class="kw">case</span> e <span class="kw">of</span>
+          <span class="dt">Right</span> (<span class="dt">Link</span> link, out) <span class="ot">-&gt;</span>
+            responseLBS status201 [
+                (<span class="st">&quot;Content-Type&quot;</span>, <span class="st">&quot;application/json&quot;</span>)
+                (<span class="st">&quot;Location&quot;</span>, link)
+                ] (encode out)
+          <span class="dt">Left</span> (status, message) <span class="ot">-&gt;</span>
+            responseLBS (mkStatus status (cs message)) [] (cs message)
+    <span class="fu">|</span> null (pathInfo request) <span class="fu">&amp;&amp;</span> requestMethod request <span class="fu">/=</span> methodPost <span class="fu">=</span>
+        respond <span class="fu">$</span> failWith <span class="dt">WrongMethod</span>
+    <span class="fu">|</span> otherwise <span class="fu">=</span> respond <span class="fu">$</span> failWith <span class="dt">NotFound</span></code></pre></div>
+<p><a href="http://haskell-servant.github.io/servant/src/Servant-API-Post.html#Post">Post</a> の実装と上記を比較すると、ほんの少し違っていることが分かります。サーバの型が <code>EitherT (Int, String) IO a</code> から <code>EitherT (Int, String) IO (Link, a)</code> に変わっています。それはこのエンドポイントを実装する 関数が単純な値を返すわけではなく、リンクと戻り値のタプルを返すということを意味しています。<code>route</code> メソッドの定義の中で、<code>Location</code>ヘッダへのリンクを加えるコードも異なっています。そのインスタンスの 定義内で、リクエストやレスポンスの詳細(ヘッダなど)にアクセスしますが、エンドポイントを実装するコードは アクセスしません。</p>
+<p><code>HasServer</code> の元の定義を見ると、<code>route</code> の第2引数である <code>action</code> が型シノニムインスタンスで関連した <code>Server</code> の型を持っていることが分かります。これは <code>EitherT (Int, String) IO (Link, a)</code> に相当します。 <code>PostWithLocation</code> は常に任意の route type の最後の要素であるべきなので、これがまさに目的と一致します。 末尾に来る結合子は定義していないので、結合子に決定権を委譲する必要があります。<code>(:&gt;)</code> のための <code>HasServer</code> インスタンスを見てみましょう。</p>
+<p>自作の結合子を使ってみましょう。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">MyAPI</span> <span class="fu">=</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">ReqBody</span> <span class="dt">User</span> <span class="fu">:&gt;</span> <span class="dt">PostWithLocation</span> ()
+
+<span class="ot">myAPI ::</span> <span class="dt">Proxy</span> <span class="dt">MyAPI</span>
+myAPI <span class="fu">=</span> <span class="dt">Proxy</span>
+
+<span class="ot">server ::</span> <span class="dt">Server</span> <span class="dt">MyAPI</span>
+server <span class="fu">=</span> mkNewUser
+    <span class="kw">where</span>
+<span class="ot">      mkNewUser ::</span> <span class="dt">User</span> <span class="ot">-&gt;</span> <span class="dt">EitherT</span> (<span class="dt">Int</span>, <span class="dt">String</span>) <span class="dt">IO</span> (<span class="dt">Link</span>, a)
+      mkNewUser <span class="fu">=</span> <span class="fu">...</span></code></pre></div>
+<p>ユースケースによって、自作の結合子のために <code>HasClient</code>, <code>HasDocs</code> インスタンスも定義したいと思うかも しれません。その時はコード生成やドキュメント生成の恩恵を受けられます。</p>
+</section>
+<section id="new-interpreters" class="level1">
+<h1>New Interpreters</h1>
+<p>APIが属している新しい「インタプリタ」を定義してみましょう。<code>HasServer</code> と同類の新しい クラスと、既存の結合子のクラスのインスタンスを書きます。</p>
+<p>この新しいインタプリタのもっとも一般的な使い方はコード生成です。<a href="http://hackage.haskell.org/package/servant-jquery">servant-jquery</a> に特に注目してみましょう。この後見ていく ものとしては、1つの手法は特定のエンドポイントのためのクライアントを書くのに必要なすべての 情報を表現する record type を持っていることです。インスタンスからインスタンスへその record を渡し、最後に結合子(<code>Get</code>など)が来るまで詳細を伝えていきます。</p>
+</section>
+<section id="other-directions" class="level1">
+<h1>Other Directions</h1>
+<p>まれなケースとして、servant の拡張がこれらのカテゴリのいずれにも属さないことがあります。 例えば、servant で無料で <em>HATEOAS</em> を手に入れたいとしましょう。次のAPIで実現します。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">MyAPI</span> <span class="fu">=</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">ReqBody</span> <span class="dt">User</span> <span class="fu">:&gt;</span> <span class="dt">Post</span> ()
+        <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;names&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;name&quot;</span> <span class="dt">String</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="dt">User</span></code></pre></div>
+<p><code>MyServer</code> サーバは自動的に型を生成します。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">MyAPIResty</span> <span class="fu">=</span> <span class="dt">Get</span> <span class="dt">HATEOASData</span>
+            <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="dt">HATEOASData</span>
+            <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">ReqBody</span> <span class="dt">User</span> <span class="fu">:&gt;</span> <span class="dt">Post</span> ()
+            <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;names&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="dt">HATEOASData</span>
+            <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;names&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;name&quot;</span> <span class="dt">String</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="dt">User</span></code></pre></div>
+<p>そのためのサーバはエンドポイントに一致するする限りにおいて <code>MyServer</code> のように振る舞い ます。しかし、他のすべてのエンドポイントを現在のエンドポイントの下にサーバを配置する ような情報を返すべきです。</p>
+<p>型レベルで重要な策略です。特に新しいサーバを生成するために型とサーバを同時に書き換える クラスを書く場合に用います。</p>
+<p>同様に、servant の拡張で興味深いことは API type の外でトライを作るシステムを書き換える ことで、それに応じてサーバのデータレベル実装を変えるので、ルート参照が線形より速くなります。</p>
+<p>もしこれ以上発展的なプロジェクトに関わったり興味があるのでしたら、ぜひ試してみてください。</p>
+</section>
+
+        </div>
+        <div id="footer">
+            Site proudly generated by
+            <a href="http://jaspervdj.be/hakyll">Hakyll</a>
+            -
+            <a href="https://github.com/haskell-servant/haskell-servant.github.io">Source</a>
+        </div>
+    </body>
+</html>

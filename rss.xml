@@ -1,0 +1,734 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"
+    xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>haskell-servant blog</title>
+        <link>http://haskell-servant.github.io</link>
+        <description><![CDATA[Posts from the haskell-servant blog]]></description>
+        <atom:link href="http://haskell-servant.github.io/rss.xml" rel="self"
+                   type="application/rss+xml" />
+        <lastBuildDate>Sat, 19 Mar 2016 00:00:00 UT</lastBuildDate>
+        <item>
+    <title>servant 0.5 released</title>
+    <link>http://haskell-servant.github.io/posts/2016-03-19-servant-0.5-release.html</link>
+    <description><![CDATA[<div id="toc"><h3>Table of contents</h3><ul>
+<li><a href="#introduction">Introduction</a></li>
+<li><a href="#upgrading">Upgrading</a><ul>
+<li><a href="#servant-server"><em>servant-server</em></a></li>
+<li><a href="#servant-client"><em>servant-client</em></a></li>
+<li><a href="#servant-docs"><em>servant-docs</em></a></li>
+<li><a href="#if-you-have-your-own-combinators">If you have your own combinators</a></li>
+</ul></li>
+<li><a href="#major-changes">Major Changes</a><ul>
+<li><a href="#trie-based-routing">Trie-based routing</a></li>
+<li><a href="#proper-error-handling">Proper error handling</a></li>
+<li><a href="#context-machinery"><code>Context</code> machinery</a></li>
+<li><a href="#http-api-data"><code>http-api-data</code></a></li>
+<li><a href="#simplify-tosample">Simplify <code>ToSample</code></a></li>
+<li><a href="#unifying-method-combinators">Unifying method combinators</a></li>
+<li><a href="#non-memoized-request-body">Non-memoized request body</a></li>
+<li><a href="#remove-matrix-params">Remove matrix params</a></li>
+<li><a href="#switch-from-eithert-to-exceptt">Switch from <code>EitherT</code> to <code>ExceptT</code></a></li>
+<li><a href="#manager-and-baseurl-as-an-argument"><code>Manager</code> and <code>BaseUrl</code> as an argument</a></li>
+<li><a href="#nocontent-and-status-codes"><code>NoContent</code> and status codes</a></li>
+<li><a href="#servant-js">servant-js</a></li>
+<li><a href="#servant-foreign">servant-foreign</a></li>
+<li><a href="#auth">Auth</a><ul>
+<li><a href="#basic-auth">Basic Auth</a></li>
+</ul></li>
+<li><a href="#documentation">Documentation</a></li>
+</ul></li>
+<li><a href="#release-management">Release Management</a></li>
+<li><a href="#conclusion">Conclusion</a></li>
+</ul></div>
+<section id="introduction" class="level1">
+<h1>Introduction</h1>
+<p>We’re happy to announce the release of <code>servant-0.5</code>. Quite a lot of exciting changes have happened since the last major release. A lot of things happened under the hood, but there’s also a number of changes on the surface. This will force <code>servant</code> users that want to upgrade to perform some changes to their code. Therefore the following section contains an upgrade guide. We hope, upgrading will go smoothly. At least when you didn’t write your own combinators it should be fairly straightforward.</p>
+<p>The second section of this blog post contains a description of the major new features in <code>servant-0.5</code>.</p>
+</section>
+<section id="upgrading" class="level1">
+<h1>Upgrading</h1>
+<section id="servant-server" class="level2">
+<h2><em>servant-server</em></h2>
+<ul>
+<li><p>Instead of <code>EitherT</code> (from <code>either</code>) we now use <code>ExceptT</code> (from <code>mtl</code>), which behaves the same, but doesn’t add a dependency. Your handler’s types have to change from e.g. <code>EitherT ServantErr IO MyType</code> to <code>ExceptT ServantErr IO MyType</code>. Throwing an error used to work with e.g. <code>left myError</code> and that now has to be switched to <code>throwE myError</code>. Both <code>ExceptT</code> and <code>throwE</code> reside in <code>Control.Monad.Trans.Except</code>.</p></li>
+<li><p><code>Post</code> now returns 200. Replace <code>Post</code> with <code>PostCreated</code> if you want to stick to the old behaviour, which was returning a 201.</p></li>
+<li><p>Methods returning <code>()</code> do not automatically return 204 anymore. Use <code>GetNoContent</code> (and <code>PostNoContent</code>, etc.) in conjunction with the <code>NoContent</code> type instead:</p></li>
+</ul>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell">    <span class="co">-- Old code</span>
+    <span class="dt">Get</span> <span class="ch">&#39;[] ()</span>
+    <span class="co">-- New code</span>
+    <span class="dt">GetNoContent</span> <span class="ch">&#39;[JSON] NoContent</span></code></pre></div>
+<ul>
+<li><p><code>MatrixParam</code> has been removed.</p></li>
+<li><p>The content-type list now is invariably used to determine whether to respond – that is, even when you’re returning <code>NoContent</code> you need to specify matching content-types.</p></li>
+</ul>
+</section>
+<section id="servant-client" class="level2">
+<h2><em>servant-client</em></h2>
+<ul>
+<li><p><code>client</code> now takes a <code>Manager</code> parameter. (See <a href="http://haddock.stackage.org/lts-5.8/http-client-0.4.27/Network-HTTP-Client-Internal.html#t:Manager">Manager</a>.)</p></li>
+<li><p><code>MatrixParam</code> has been removed.</p></li>
+</ul>
+</section>
+<section id="servant-docs" class="level2">
+<h2><em>servant-docs</em></h2>
+<ul>
+<li><p><code>ToSample</code> now only takes one type parameter.</p></li>
+<li><p><code>MatrixParam</code> has been removed.</p></li>
+</ul>
+</section>
+<section id="if-you-have-your-own-combinators" class="level2">
+<h2>If you have your own combinators</h2>
+<p>Then the story is more complicated. The <code>HasServer</code> class changed quite drastically:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="co">-- Previously</span>
+<span class="kw">class</span> <span class="dt">HasServer</span> layout config <span class="kw">where</span>
+   <span class="kw">type</span> <span class="dt">ServerT</span> layout (<span class="ot">m ::</span> <span class="fu">*</span> <span class="ot">-&gt;</span> <span class="fu">*</span>)<span class="ot"> ::</span> <span class="fu">*</span>
+<span class="ot">   route ::</span> <span class="dt">Proxy</span> layout <span class="ot">-&gt;</span> <span class="dt">Server</span> layout <span class="ot">-&gt;</span> <span class="dt">RoutingApplication</span>
+
+<span class="co">-- Now</span>
+<span class="kw">class</span> <span class="dt">HasServer</span> layout config <span class="kw">where</span>
+   <span class="kw">type</span> <span class="dt">ServerT</span> layout (<span class="ot">m ::</span> <span class="fu">*</span> <span class="ot">-&gt;</span> <span class="fu">*</span>)<span class="ot"> ::</span> <span class="fu">*</span>
+<span class="ot">   route ::</span> <span class="dt">Proxy</span> layout <span class="ot">-&gt;</span> <span class="dt">Config</span> config <span class="ot">-&gt;</span> <span class="dt">Delayed</span> (<span class="dt">Server</span> layout) <span class="ot">-&gt;</span> <span class="dt">Router</span></code></pre></div>
+<p>Read below for more information.</p>
+</section>
+</section>
+<section id="major-changes" class="level1">
+<h1>Major Changes</h1>
+<section id="trie-based-routing" class="level2">
+<h2>Trie-based routing</h2>
+<p>Previously routing was <em>O(n)</em> in the number of routes, as we matched them sequentially (and indeed, bodies would sometimes be deserialized more than once). Andres Löh improved this by transforming the routing into a trie.</p>
+</section>
+<section id="proper-error-handling" class="level2">
+<h2>Proper error handling</h2>
+<p>One of the biggest embarassements for <code>servant</code> was the fact that in certain circumstances, the HTTP error returned was not what one would expect. For example, if a request had both the wrong method and the wrong body, the error returned would be 400 (Bad Request) rather 405 (Method Not Allowed). This was because we matched against parts of your API in the order they appeared in your API type. Andres Löh came up with an elegant solution to this problem, creating a datatype that allows checks (and their side-effects) to be delayed.</p>
+<p>This allows for a fine-grained control over when side-effects and general HTTP logic is run. Currently there are five ‘slots’ for effects:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Delayed</span> c <span class="kw">where</span>
+  <span class="dt">Delayed</span><span class="ot"> ::</span> {<span class="ot"> capturesD ::</span> <span class="dt">IO</span> (<span class="dt">RouteResult</span> captures)
+             ,<span class="ot"> methodD   ::</span> <span class="dt">IO</span> (<span class="dt">RouteResult</span> ())
+             ,<span class="ot"> authD     ::</span> <span class="dt">IO</span> (<span class="dt">RouteResult</span> auth)
+             ,<span class="ot"> bodyD     ::</span> <span class="dt">IO</span> (<span class="dt">RouteResult</span> body)
+             ,<span class="ot"> serverD   ::</span> (captures <span class="ot">-&gt;</span> auth <span class="ot">-&gt;</span> body <span class="ot">-&gt;</span> <span class="dt">RouteResult</span> c)
+             } <span class="ot">-&gt;</span> <span class="dt">Delayed</span> c</code></pre></div>
+<p>Which are run in the order in which they appear in the code. <a href="https://github.com/haskell-servant/servant/blob/master/servant-server/src/Servant/Server/Internal/RoutingApplication.hs#L140-L202">Helper functions</a> can be used to add more effects. In practice, this means that if you are writing a combinator for authentication, for example, you can simply use <code>addAuthCheck</code> to schedule your action. It will only be run if the captures and methods match, but before the body is looked at.</p>
+<p>These five slots do not exhaust the steps of handling an HTTP request. But rather than straight away implement a very large datatype for the entire <a href="https://camo.githubusercontent.com/4e15cccf2a9277dcca2c8824092547dee7058744/68747470733a2f2f7261776769746875622e636f6d2f666f722d4745542f687474702d6465636973696f6e2d6469616772616d2f6d61737465722f6874747064642e706e67">HTTP decision diagram</a>, we decided to implement what was needed for the official <code>servant</code> combinators. We now want to gather some experience to see, if something’s missing. So if you feel like another slot is needed, open an issue!</p>
+</section>
+<section id="context-machinery" class="level2">
+<h2><code>Context</code> machinery</h2>
+<p>We had an issue that kept annoying us. Consider a <code>HasServer</code> instance for a combinator that provides a <code>User</code> by looking up the cookie in a database. You have to be able to somehow pass the lookup function – or at least a connection to a database – into that instance. But they must be passed in at run-time, and for fairly involved reasons there was no good way of doing so.</p>
+<p>We added a new parameter to <code>route</code> that is an <code>HList</code> with configuration data not unlike <em>Spock</em>’s <code>Context</code>. If you are not writing <code>HasServer</code> instances, <code>Context</code> requires no changes to your code for upgrading. If you are, note that the <code>HasServer</code> type class has an extra type parameter.</p>
+<p>This change should enable a variety of new combinators that were difficult or impossible previously. Note that <code>Context</code> is (for now at least) meant only for the configuration of combinator instances, not for the configuration of handlers (use <code>enter</code> for the latter).</p>
+</section>
+<section id="http-api-data" class="level2">
+<h2><code>http-api-data</code></h2>
+<p>The type classes <code>FromText</code> and <code>ToText</code> have been renamed, revamped, and relocated. They are now called <code>FromHttpApiData</code> and <code>ToHttpApiData</code> respectively, and exist in the new package <code>http-api-data</code>. This was work by Nickolay Kudasov, and includes a variety of other improvements. Most noticeably, rather than having a single [de/]serialization method, there are now ones for each of the cases for which we need the [de/]serialization. (This was based on an idea from Greg Weber.):</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">class</span> <span class="dt">FromHttpApiData</span> a <span class="kw">where</span>
+    <span class="ot">{-# MINIMAL parseUrlPiece | parseQueryParam #-}</span>
+<span class="ot">    parseUrlPiece ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Either</span> <span class="dt">Text</span> a
+    parseUrlPiece <span class="fu">=</span> parseQueryParam
+
+<span class="ot">    parseHeader ::</span> <span class="dt">ByteString</span> <span class="ot">-&gt;</span> <span class="dt">Either</span> <span class="dt">Text</span> a
+    parseHeader <span class="fu">=</span> parseUrlPiece <span class="fu">.</span> decodeUtf8
+
+<span class="ot">    parseQueryParam ::</span> <span class="dt">Text</span> <span class="ot">-&gt;</span> <span class="dt">Either</span> <span class="dt">Text</span> a
+    parseQueryParam <span class="fu">=</span> parseUrlPiece</code></pre></div>
+<p>As an added bonus, the Template Haskell for <code>persistent</code> generates these automatically, making using <code>persistent</code> with <code>servant</code> a lot easier.</p>
+<p>The <a href="http://hackage.haskell.org/package/http-api-data-0.2.2/docs/Web-HttpApiData.html">haddocks</a> for the package have more information.</p>
+</section>
+<section id="simplify-tosample" class="level2">
+<h2>Simplify <code>ToSample</code></h2>
+<p><code>ToSample</code> now takes only one parameter. It was an annoying mistake that it ever took two, which Nickolay Kudasov fixed. Additionally, instead of having two methods (<code>toSample</code> and <code>toSamples</code>) defined in terms of one another, we now have a single one (<code>toSamples</code>).</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">MyData</span> <span class="fu">=</span> <span class="dt">MyData</span> <span class="dt">Int</span>
+
+<span class="co">-- Old code</span>
+<span class="kw">instance</span> <span class="dt">ToSample</span> <span class="dt">MyData</span> <span class="dt">MyData</span> <span class="kw">where</span>
+    toSample _ <span class="fu">=</span> singleSample (<span class="dt">MyData</span> <span class="dv">42</span>)
+
+<span class="kw">instance</span> <span class="dt">ToSample</span> <span class="dt">MyData</span> <span class="kw">where</span>
+    toSamples _ <span class="fu">=</span> singleSample (<span class="dt">MyData</span> <span class="dv">42</span>)</code></pre></div>
+<p>Nickolay also made a <code>Generic</code> default method for this class, so that now you could simply have:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">MyData</span> <span class="fu">=</span> <span class="dt">MyData</span> <span class="dt">Int</span> <span class="kw">deriving</span> (<span class="dt">Generic</span>)
+
+<span class="kw">instance</span> <span class="dt">ToSample</span> <span class="dt">MyData</span></code></pre></div>
+</section>
+<section id="unifying-method-combinators" class="level2">
+<h2>Unifying method combinators</h2>
+<p>Previously each of ‘Get’, ‘Put’, ‘Post’, etc. were entirely separate datatypes. This also meant each interpretation needed to included instances for all of them. The 0.5 release makes them instead type-synonyms, e.g.:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">Get</span> contentTypes a <span class="fu">=</span> <span class="dt">Verb</span> <span class="ch">&#39;GET 200 contentTypes a</span></code></pre></div>
+<p>This makes it easy to change the status code of a success response. To further facilitate that, we now provide a variety of other type synonyms for responses other than 200, for example <code>PostCreated</code> for 201.</p>
+</section>
+<section id="non-memoized-request-body" class="level2">
+<h2>Non-memoized request body</h2>
+<p>Prior to Andres Löh’s trie-based routing improvements, we had to keep the request body in memory for more-or-less the duration of the request-response cycle. This was of course far from ideal, but necessary given that we could not tell whether the request might be re-routed to a different endpoint. After the changes, we can now remove it. Note however that certain idioms, such as</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">API</span> <span class="fu">=</span> <span class="dt">ReqBody</span> <span class="ch">&#39;[JSON] Int :&gt; Get &#39;</span>[<span class="dt">JSON</span>] <span class="dt">Int</span>
+      <span class="fu">:&lt;|&gt;</span> <span class="dt">ReqBody</span> <span class="ch">&#39;[JSON] String :&gt; Get &#39;</span>[<span class="dt">JSON</span>] <span class="dt">String</span></code></pre></div>
+<p>no longer make sense – a request body that cannot be decoded as an <code>Int</code> will be rejected with a 400, and the second endpoint will not be tried. This accords with the behaviour of more traditional frameworks and, as Edsko de Vries showed in a <a href="http://www.edsko.net/temp/dependently-typed-servers/">blog post</a>, no loss of expressivity is entailed by the change.</p>
+<p>We expect this to enable streaming combinators.</p>
+</section>
+<section id="remove-matrix-params" class="level2">
+<h2>Remove matrix params</h2>
+<p>Matrix params were interacting poorly with the rest of <code>servant</code>, because they necessitate special behaviour. We decided to remove them. If you were relying on them and would like to see them back, please let us know.</p>
+</section>
+<section id="switch-from-eithert-to-exceptt" class="level2">
+<h2>Switch from <code>EitherT</code> to <code>ExceptT</code></h2>
+<p>Along with the rest of the world, we’ve moved to <code>ExceptT</code>, which is in <code>mtl</code>. Updating should consist of just replacing all occurrences of <code>EitherT</code> with <code>ExceptT</code> and all occurrences of <code>left</code> with <code>throwE</code>.</p>
+</section>
+<section id="manager-and-baseurl-as-an-argument" class="level2">
+<h2><code>Manager</code> and <code>BaseUrl</code> as an argument</h2>
+<p>Previously the <em>http-client</em> <code>Manager</code> – which is used to issue http requests – was created (with <code>unsafePerformIO</code>) by the <em>servant-client</em> library itself. This meant that it was impossible to configure the <code>Manager</code>. Now the <code>Manager</code> is passed in as an argument to client:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="co">-- Old code</span>
+endpoint1 <span class="fu">:&lt;|&gt;</span> endpoint2 <span class="fu">=</span> client api
+<span class="co">-- endpoint1 :: BaseUrl -&gt; X</span>
+<span class="co">-- New code</span>
+endpoint1 <span class="fu">:&lt;|&gt;</span> endpoint2 <span class="fu">=</span> client api baseUrl manager
+<span class="co">-- endpoint1 :: X</span></code></pre></div>
+<p>We’re not entirely happy with this solution, since sometimes you want the <code>endpoint1</code> functions to take these two arguments instead (for example, if you would like to distribute client functions as a library). But it is certainly an improvement.</p>
+</section>
+<section id="nocontent-and-status-codes" class="level2">
+<h2><code>NoContent</code> and status codes</h2>
+<p>Previously we were much too smart about HTTP status codes. In particular, when the type of the response was <code>()</code>, we would return 204 (<code>No Content</code>). This was sometimes convenient, but generally more trouble than it was worth – some people wanted 200 codes anyhow, some people pointed out that 205 (<code>Reset Content</code>) was also often a sensible response, and moreover, <code>()</code> was too generally-used a type to convey the appropriate semantics. We now have a dedicated <code>NoContent</code> type for that, and the status code is up to you to decide (by default it will continue to be 200).</p>
+<p><em>NOTE</em>: additionally, and for many of the same reasons, <code>Post</code> now returns an HTTP 200 on success (rather than 201). Use <code>PostCreated</code> if you would like the old behaviour.</p>
+</section>
+<section id="servant-js" class="level2">
+<h2>servant-js</h2>
+<p>The javascript codegen story has been considerably improved. Not only is there <code>jquery</code>-based codegen, but also <a href="https://angularjs.org/"><code>Angular</code></a>, <a href="https://github.com/mzabriskie/axios"><code>Axios</code></a> and vanilla (xhr-based) codegen. freezeboy wrote a separate post going into more details about how all of it works – stay tuned for it.</p>
+<p>Furthermore, we have extracted common functionality for code-generation into <code>servant-foreign</code>. During this change, we have switched from <code>String</code> to the <code>text</code>-package. So if you were using <code>servant-jquery</code> before and are now switching to <code>servant-js</code>, take into account that we do not use the <code>String</code> datatype anymore.</p>
+</section>
+<section id="servant-foreign" class="level2">
+<h2>servant-foreign</h2>
+<p>There has been a proliferation of code-generation libraries for <code>servant</code>. With this in mind, Denis Redozubov wrote <code>servant-foreign</code> is a library purposed to address the common code-generation needs. It derives the term-level endpoints descriptions from the servant typelevel API DSL. Once you have this, it’s easy to implement code-generation for any target language. In the nutshell it allows you to generate http api clients for servant servers and incorporate that into your build/CI process. <code>servant-js</code> and some other libraries use <code>servant-foreign</code> under the hood to achieve this.</p>
+</section>
+<section id="auth" class="level2">
+<h2>Auth</h2>
+<p>One of the most drawn out discussions and PRs in <code>servant</code> has been Auth. Aaron Levin was patient enough to work through several ideas as all of us explored the design space. We currently have two auth combinators: a <code>BasicAuth</code> combinator, and a still somewhat experimental but more general <code>AuthProtect</code> combinator.</p>
+<section id="basic-auth" class="level3">
+<h3>Basic Auth</h3>
+<p>(<em>NOTE</em>: Basic Auth sends text in the clear, so only use this over HTTPS!)</p>
+<p>An API protected by Basic Auth in <code>servant</code> looks like this:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">User</span> <span class="fu">=</span> <span class="fu">...</span>
+<span class="kw">type</span> <span class="dt">API</span> <span class="fu">=</span> <span class="dt">BasicAuth</span> <span class="st">&quot;my-realm&quot;</span> <span class="dt">User</span> <span class="fu">:&gt;</span> <span class="dt">PrivateAPI</span></code></pre></div>
+<p>Where <code>User</code> is an application-specific datatype that your handlers will receive as an argument in case authentication succeeds.</p>
+<p><code>servant</code> needs to know how to generate a <code>User</code> from a username and password string. For that, we use the new <code>Context</code> mechanism.</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="ot">serverContext ::</span> <span class="dt">Context</span> (<span class="dt">BasicAuthCheck</span> <span class="dt">User</span> <span class="ch">&#39;: &#39;</span>[])
+serverContext <span class="fu">=</span> authCheck <span class="fu">:.</span> <span class="dt">EmptyContext</span>
+
+<span class="ot">authCheck ::</span> <span class="dt">BasicAuthCheck</span> <span class="dt">User</span>
+authCheck <span class="fu">=</span>
+  <span class="kw">let</span> check (<span class="dt">BasicAuthData</span> username password) <span class="fu">=</span>
+        <span class="kw">if</span> username <span class="fu">==</span> <span class="st">&quot;servant&quot;</span> <span class="fu">&amp;&amp;</span> password <span class="fu">==</span> <span class="st">&quot;server&quot;</span>
+        <span class="kw">then</span> return (<span class="dt">Authorized</span> (<span class="dt">User</span> <span class="st">&quot;servant&quot;</span>))
+        <span class="kw">else</span> return <span class="dt">Unauthorized</span>
+  <span class="kw">in</span> <span class="dt">BasicAuthCheck</span> check</code></pre></div>
+</section>
+</section>
+<section id="documentation" class="level2">
+<h2>Documentation</h2>
+<p>Sönke Hahn has done a lot of work improving our tutorial and documentation. We have moved to <a href="http://haskell-servant.readthedocs.org/">Read the Docs</a>, which should make it easy to provide documentation for multiple versions of <code>servant</code>. We have also moved towards literate Haskell, which has already improved the quality of the documentation.</p>
+</section>
+</section>
+<section id="release-management" class="level1">
+<h1>Release Management</h1>
+<p><code>servant-0.5</code> was a long time in the making. We initially hoped to cut a release last summer. In the future we hope that we can move to a much more aggressive release managament. So we hope <code>servant-0.6</code> is coming soon, with a lot less changes.</p>
+</section>
+<section id="conclusion" class="level1">
+<h1>Conclusion</h1>
+<p>We hope you enjoy the new release. It was certainly lots of fun to work on <code>servant-0.5</code>. We’d like to say thanks to all the people that helped, big or small. Happy hacking.</p>
+</section>
+
+<div class="info">
+    Posted on March 19, 2016
+    
+        by The servant team
+    
+</div>
+]]></description>
+    <pubDate>Sat, 19 Mar 2016 00:00:00 UT</pubDate>
+    <guid>http://haskell-servant.github.io/posts/2016-03-19-servant-0.5-release.html</guid>
+    <dc:creator>servant developers</dc:creator>
+</item>
+<item>
+    <title>Announcing servant-swagger and swagger2</title>
+    <link>http://haskell-servant.github.io/posts/2016-02-06-servant-swagger.html</link>
+    <description><![CDATA[<section id="swagger" class="level2">
+<h2>Swagger</h2>
+<p><code>Servant</code> is not the first project to provide a unified way of documenting APIs. There is <code>API Blueprint</code>, <code>RAML</code>, <code>Apiary</code>, and finally <code>swagger</code>. While these Web API description languages are not also web frameworks , they are generally very mature, and have some amazing tooling. For example, take a look at what <code>swagger-ui</code>, a client-side HTML, CSS, and JS bundle, does with your <code>swagger</code> API description <a href="http://petstore.swagger.io/?url=https://gist.githubusercontent.com/fizruk/1037ddb2c81c017f4de6/raw/c4061c9655d7f0a6a51b0eebf1e16f64cc969a07/gist.swagger.json#/default">here</a>.</p>
+<p>As you can see, it’s a very convenient and approachable way of exploring your API. In addition to an easily-navigable structure, you can build up requests and send them to your server, and see its responses.</p>
+<p>But it doesn’t end there. If you have a <code>swagger</code> specification of your API, you can also take advantage of the large variety of <a href="https://github.com/swagger-api/swagger-codegen/blob/master/README.md#customizing-the-generator">languages</a> for which you can generate a client library automatically. You don’t even need to build the Java code - you can just use the “Generate Client” button in the beautiful <a href="http://editor.swagger.io/#/">swagger editor</a>.</p>
+<p>There are a wide array of other <a href="http://swagger.io/open-source-integrations/">tools</a> that support <code>swagger</code>. Obviously, having access to them would be a great boon. The problem so far has been that writing and maintaining a <code>swagger</code> specification, that you can be sure matches your service, is hard work.</p>
+</section>
+<section id="swagger2-and-servant-swagger" class="level2">
+<h2>swagger2 and servant-swagger</h2>
+<p>Thankfully David Johnson and Nickolay Kudasov have written two Haskell libraries, <a href="https://hackage.haskell.org/package/swagger2">swagger2</a> and <a href="https://hackage.haskell.org/package/servant-swagger">servant-swagger</a>, that automate nearly all of that process for <code>servant</code> APIs. They use the mechanism that guides most of the <code>servant</code> ecosystem — interpreters for the type-level DSL for APIs that is <code>servant</code> — to generate a swagger spec for that API.</p>
+<p>Let’s see how it is used; as an example, we’re going to take the Gists part of the <a href="https://developer.github.com/v3/gists/">GitHub API v3</a>. For the purpose of this post we will ignore authentication and consider only <code>GET</code> requests which do not require one. Furthermore, we’ll use simplified representation for the responses (i.e. we are also ignoring some fields of the response objects).</p>
+<p>First the imports and pragmas (this is a <a href="https://github.com/haskell-servant/haskell-servant.github.io/blob/hakyll/posts/2016-02-06-servant-swagger.lhs">literate haskell file</a>):</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">{-# LANGUAGE DataKinds #-}</span>
+<span class="ot">{-# LANGUAGE DeriveGeneric #-}</span>
+<span class="ot">{-# LANGUAGE GeneralizedNewtypeDeriving #-}</span>
+<span class="ot">{-# LANGUAGE OverloadedStrings #-}</span>
+<span class="ot">{-# LANGUAGE TypeOperators #-}</span>
+<span class="kw">module</span> <span class="dt">Gists</span> <span class="kw">where</span>
+
+<span class="kw">import </span><span class="dt">Control.Lens</span>
+<span class="kw">import </span><span class="dt">Data.Aeson</span>
+<span class="kw">import </span><span class="dt">Data.Aeson.Types</span> (camelTo2)
+<span class="kw">import qualified</span> <span class="dt">Data.Aeson.Types</span> <span class="kw">as</span> <span class="dt">JSON</span>
+<span class="kw">import qualified</span> <span class="dt">Data.ByteString.Lazy.Char8</span> <span class="kw">as</span> <span class="dt">BL8</span>
+<span class="kw">import </span><span class="dt">Data.HashMap.Strict</span> (<span class="dt">HashMap</span>)
+<span class="kw">import </span><span class="dt">Data.Proxy</span>
+<span class="kw">import </span><span class="dt">Data.Swagger</span>
+<span class="kw">import </span><span class="dt">Data.Text</span> (<span class="dt">Text</span>)
+<span class="kw">import </span><span class="dt">Data.Time</span> (<span class="dt">UTCTime</span>)
+<span class="kw">import </span><span class="dt">GHC.Generics</span> (<span class="dt">Generic</span>)
+<span class="kw">import </span><span class="dt">Servant</span>
+<span class="kw">import </span><span class="dt">Servant.Swagger</span></code></pre></div>
+<p>The API:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">GitHubGistAPI</span>
+    <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;username&quot;</span> <span class="dt">Username</span> <span class="fu">:&gt;</span> <span class="st">&quot;gists&quot;</span> <span class="fu">:&gt;</span> <span class="dt">QueryParam</span> <span class="st">&quot;since&quot;</span> <span class="dt">UTCTime</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] [Gist]</span>
+ <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;gists&quot;</span> <span class="fu">:&gt;</span> <span class="dt">GistsAPI</span>
+
+<span class="kw">type</span> <span class="dt">GistsAPI</span>
+    <span class="fu">=</span> <span class="st">&quot;public&quot;</span>  <span class="fu">:&gt;</span> <span class="dt">QueryParam</span> <span class="st">&quot;since&quot;</span> <span class="dt">UTCTime</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] [Gist]</span>
+ <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;starred&quot;</span> <span class="fu">:&gt;</span> <span class="dt">QueryParam</span> <span class="st">&quot;since&quot;</span> <span class="dt">UTCTime</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] [Gist]</span>
+ <span class="fu">:&lt;|&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;id&quot;</span> <span class="dt">GistId</span> <span class="fu">:&gt;</span> <span class="dt">GistAPI</span>
+
+<span class="kw">type</span> <span class="dt">GistAPI</span>
+    <span class="fu">=</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] Gist</span>
+ <span class="fu">:&lt;|&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;sha&quot;</span> <span class="dt">Revision</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] Gist</span>
+
+<span class="ot">api ::</span> <span class="dt">Proxy</span> <span class="dt">GitHubGistAPI</span>
+api <span class="fu">=</span> <span class="dt">Proxy</span></code></pre></div>
+<p>Data types:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">newtype</span> <span class="dt">Username</span> <span class="fu">=</span> <span class="dt">Username</span> <span class="dt">Text</span> <span class="kw">deriving</span> (<span class="dt">Generic</span>, <span class="dt">ToText</span>, <span class="dt">FromJSON</span>)
+
+<span class="kw">newtype</span> <span class="dt">GistId</span> <span class="fu">=</span> <span class="dt">GistId</span> <span class="dt">Text</span> <span class="kw">deriving</span> (<span class="dt">Generic</span>, <span class="dt">ToText</span>, <span class="dt">FromJSON</span>)
+
+<span class="kw">newtype</span> <span class="dt">SHA</span> <span class="fu">=</span> <span class="dt">SHA</span> <span class="dt">Text</span> <span class="kw">deriving</span> (<span class="dt">Generic</span>, <span class="dt">ToText</span>)
+
+<span class="kw">type</span> <span class="dt">Revision</span> <span class="fu">=</span> <span class="dt">SHA</span>
+
+<span class="kw">data</span> <span class="dt">Gist</span> <span class="fu">=</span> <span class="dt">Gist</span>
+  {<span class="ot"> gistId          ::</span> <span class="dt">GistId</span>
+  ,<span class="ot"> gistDescription ::</span> <span class="dt">Text</span>
+  ,<span class="ot"> gistOwner       ::</span> <span class="dt">Owner</span>
+  ,<span class="ot"> gistFiles       ::</span> <span class="dt">HashMap</span> FilePath <span class="dt">GistFile</span>
+  ,<span class="ot"> gistTruncated   ::</span> <span class="dt">Bool</span>
+  ,<span class="ot"> gistComments    ::</span> <span class="dt">Integer</span>
+  ,<span class="ot"> gistCreatedAt   ::</span> <span class="dt">UTCTime</span>
+  ,<span class="ot"> gistUpdatedAt   ::</span> <span class="dt">UTCTime</span>
+  } <span class="kw">deriving</span> (<span class="dt">Generic</span>)
+
+<span class="kw">data</span> <span class="dt">OwnerType</span> <span class="fu">=</span> <span class="dt">User</span> <span class="fu">|</span> <span class="dt">Organization</span>
+  <span class="kw">deriving</span> (<span class="dt">Generic</span>)
+
+<span class="kw">data</span> <span class="dt">Owner</span> <span class="fu">=</span> <span class="dt">Owner</span>
+  {<span class="ot"> ownerLogin      ::</span> <span class="dt">Username</span>
+  ,<span class="ot"> ownerType       ::</span> <span class="dt">OwnerType</span>
+  ,<span class="ot"> ownerSiteAdmin  ::</span> <span class="dt">Bool</span>
+  } <span class="kw">deriving</span> (<span class="dt">Generic</span>)
+
+<span class="kw">data</span> <span class="dt">GistFile</span> <span class="fu">=</span> <span class="dt">GistFile</span>
+  {<span class="ot"> gistfileSize      ::</span> <span class="dt">Integer</span>
+  ,<span class="ot"> gistfileLanguage  ::</span> <span class="dt">Text</span>
+  ,<span class="ot"> gistfileRawUrl    ::</span> <span class="dt">Text</span>
+  } <span class="kw">deriving</span> (<span class="dt">Generic</span>)</code></pre></div>
+<p><code>FromJSON</code> instances:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">modifier ::</span> <span class="dt">String</span> <span class="ot">-&gt;</span> <span class="dt">String</span>
+modifier <span class="fu">=</span> drop <span class="dv">1</span> <span class="fu">.</span> dropWhile (<span class="fu">/=</span> <span class="ch">&#39;_&#39;</span>) <span class="fu">.</span> camelTo2 <span class="ch">&#39;_&#39;</span>
+
+<span class="ot">prefixOptions ::</span> <span class="dt">JSON.Options</span>
+prefixOptions <span class="fu">=</span> JSON.defaultOptions { JSON.fieldLabelModifier <span class="fu">=</span> modifier }
+
+<span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">OwnerType</span>
+<span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">Owner</span>    <span class="kw">where</span> parseJSON <span class="fu">=</span> genericParseJSON prefixOptions
+<span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">GistFile</span> <span class="kw">where</span> parseJSON <span class="fu">=</span> genericParseJSON prefixOptions
+<span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">Gist</span>     <span class="kw">where</span> parseJSON <span class="fu">=</span> genericParseJSON prefixOptions</code></pre></div>
+<p>So far this is what you would usually have when working with <code>servant</code>. Now to generate Swagger specification we need to define schemas for our types. This is done with <code>ToParamSchema</code> and <code>ToSchema</code> instances:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">prefixSchemaOptions ::</span> <span class="dt">SchemaOptions</span>
+prefixSchemaOptions <span class="fu">=</span> defaultSchemaOptions { fieldLabelModifier <span class="fu">=</span> modifier }
+
+<span class="kw">instance</span> <span class="dt">ToParamSchema</span> <span class="dt">SHA</span>
+<span class="kw">instance</span> <span class="dt">ToParamSchema</span> <span class="dt">Username</span>
+<span class="kw">instance</span> <span class="dt">ToParamSchema</span> <span class="dt">GistId</span>
+
+<span class="kw">instance</span> <span class="dt">ToSchema</span> <span class="dt">Username</span>
+<span class="kw">instance</span> <span class="dt">ToSchema</span> <span class="dt">GistId</span>
+<span class="kw">instance</span> <span class="dt">ToSchema</span> <span class="dt">OwnerType</span>
+<span class="kw">instance</span> <span class="dt">ToSchema</span> <span class="dt">Owner</span>    <span class="kw">where</span> declareNamedSchema <span class="fu">=</span> genericDeclareNamedSchema prefixSchemaOptions
+<span class="kw">instance</span> <span class="dt">ToSchema</span> <span class="dt">GistFile</span> <span class="kw">where</span> declareNamedSchema <span class="fu">=</span> genericDeclareNamedSchema prefixSchemaOptions
+<span class="kw">instance</span> <span class="dt">ToSchema</span> <span class="dt">Gist</span>     <span class="kw">where</span> declareNamedSchema <span class="fu">=</span> genericDeclareNamedSchema prefixSchemaOptions</code></pre></div>
+<p>These will give us a generically-derived Swagger schema (which is sort of a deterministic version of JSON Schema).</p>
+<p>Part of the <code>swagger2</code> package, <code>Schema</code> and <code>ParamSchema</code> can be quite useful in their own right if you want to e.g. respond with a schema in case of bad request bodies, or <code>OPTIONS</code> requests.</p>
+<p>The next step will traverse the <code>GitHubGistAPI</code>, gathering information about it and <code>swagger2</code> schemas to generate a <code>Swagger</code> value:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">swaggerDoc1 ::</span> <span class="dt">Swagger</span>
+swaggerDoc1 <span class="fu">=</span> toSwagger api</code></pre></div>
+<p>Now we can generate the swagger documentation:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">genSwaggerDoc1 ::</span> <span class="dt">IO</span> ()
+genSwaggerDoc1 <span class="fu">=</span> BL8.putStr <span class="fu">$</span> encode swaggerDoc1</code></pre></div>
+<p>You can attach more information to your <code>Swagger</code> doc quite easily, using the lenses provided by <code>swagger2</code>:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">swaggerDoc2 ::</span> <span class="dt">Swagger</span>
+swaggerDoc2 <span class="fu">=</span> swaggerDoc1
+  <span class="fu">&amp;</span> host <span class="fu">?~</span> <span class="st">&quot;api.github.com&quot;</span>
+  <span class="fu">&amp;</span> info<span class="fu">.</span>title <span class="fu">.~</span> <span class="st">&quot;GitHub Gists API&quot;</span>
+  <span class="fu">&amp;</span> info<span class="fu">.</span>version <span class="fu">.~</span> <span class="st">&quot;v3&quot;</span></code></pre></div>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">main ::</span> <span class="dt">IO</span> ()
+main <span class="fu">=</span> BL8.putStr <span class="fu">$</span> encode swaggerDoc2</code></pre></div>
+<p>Which results in <a href="https://gist.githubusercontent.com/fizruk/1037ddb2c81c017f4de6/raw/c4061c9655d7f0a6a51b0eebf1e16f64cc969a07/gist.swagger.json">this</a>.</p>
+<p>There’s a lot more you can do with both <code>servant-swagger</code> and <code>swagger2</code> — write manual <code>ToSchema</code> instances for more detailed information, conveniently add tags or change responses of parts of your API, use convenient lenses to modify any part of your schema, generate automatic tests, etc.</p>
+<p>Check out the <a href="https://hackage.haskell.org/package/servant-swagger"><code>servant-swagger</code></a> and <a href="https://hackage.haskell.org/package/swagger2"><code>swagger2</code></a> docs for more.</p>
+<p>These two new packages vastly expand the landscape of tools within easy reach of application developers using <code>servant</code>. Time to explore that landscape!</p>
+<p>On a related note, Masahiro Yamauchi has recently <a href="https://github.com/swagger-api/swagger-codegen/pull/2009">added Servant codegen for Swagger</a>. So not only can you generate a swagger description for your servant server, but you can also generate the servant description from a swagger one too!</p>
+</section>
+
+<div class="info">
+    Posted on February  6, 2016
+    
+        by David Johnson, Nickolay Kudasov, Julian Arni
+    
+</div>
+]]></description>
+    <pubDate>Sat, 06 Feb 2016 00:00:00 UT</pubDate>
+    <guid>http://haskell-servant.github.io/posts/2016-02-06-servant-swagger.html</guid>
+    <dc:creator>servant developers</dc:creator>
+</item>
+<item>
+    <title>Content Type Bliss</title>
+    <link>http://haskell-servant.github.io/posts/2015-08-05-content-types.html</link>
+    <description><![CDATA[<p>Recently I came across Timo von Holtz’s <a href="https://hackage.haskell.org/package/servant-JuicyPixels">servant-JuicyPixels</a> package. It describes <code>servant</code>-compatible content-types for JuicyPixel’s <code>DynamicImage</code> data type, and clocks under 100 airy lines.</p>
+<p>Timo and I realized there is a pretty neat demonstration of the advantage of abstracting away content-type serialization and deserialization: the world’s most concise image-conversion web service. Essentially the same application is available as the <a href="https://github.com/tvh/servant-JuicyPixels/blob/master/examples/image-conversion.hs"><code>image conversion</code> example</a> in Timo’s package.</p>
+<p>(If you want to know more about how content-types work in <code>servant</code>, the <a href="http://haskell-servant.github.io/tutorial/server.html#using-content-types-with-your-data-types">content-type section of the tutorial</a> has more information.)</p>
+<section id="the-application" class="level1">
+<h1>The Application</h1>
+<p>Our goal is to provide a service that converts images between formats based on the <code>Content-Type</code> and <code>Accept</code> headers of the request:</p>
+<pre class="shell"><code>$ curl localhost:8001 -H &quot;Content-Type: image/png&quot;  \
+                      -H &quot;Accept: image/jpeg&quot;  \
+                      --data-binary &quot;@haskell-logo.png&quot; \
+                      &gt; haskell-logo.jpeg</code></pre>
+<p>To get there, we need to do a couple of things. We need to of course run the application:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="ot">main ::</span> <span class="dt">IO</span> ()
+main <span class="fu">=</span> run <span class="dv">8001</span> conversion</code></pre></div>
+<p>And describe the API:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">ConversionApi</span>
+     <span class="fu">=</span> <span class="dt">ReqBody</span> <span class="ch">&#39;[BMP, GIF, JPEG 50, PNG, TIFF, RADIANCE] DynamicImage</span>
+    <span class="fu">:&gt;</span> <span class="dt">Post</span> <span class="ch">&#39;[BMP, GIF, JPEG 50, PNG, TIFF, RADIANCE] DynamicImage</span></code></pre></div>
+<p>As you can see, we state that we accept and can return a variety of image formats.</p>
+<p>The application is then:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="ot">conversion ::</span> <span class="dt">Application</span>
+conversion <span class="fu">=</span> serve (<span class="dt">Proxy</span><span class="ot"> ::</span> <span class="dt">Proxy</span> <span class="dt">ConversionApi</span>) handler</code></pre></div>
+<p>And for the clincher, the handler:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell">    <span class="kw">where</span> handler <span class="fu">=</span> return</code></pre></div>
+<p>And that’s it!</p>
+</section>
+<section id="conclusion" class="level1">
+<h1>Conclusion</h1>
+<p>This is just the limit of the relative gain of abstracting content-types - there is nothing to the application besides them!</p>
+<p>Essentially the same idea could of course be applied to other areas. Document conversion with Pandoc, video and audio formats, etc.</p>
+</section>
+
+<div class="info">
+    Posted on August  5, 2015
+    
+        by Julian K. Arni
+    
+</div>
+]]></description>
+    <pubDate>Wed, 05 Aug 2015 00:00:00 UT</pubDate>
+    <guid>http://haskell-servant.github.io/posts/2015-08-05-content-types.html</guid>
+    <dc:creator>servant developers</dc:creator>
+</item>
+<item>
+    <title>Pulling a mock server for your APIs out of thin air</title>
+    <link>http://haskell-servant.github.io/posts/2015-07-24-pulling-mock-servers-out-of-thin-air.html</link>
+    <description><![CDATA[<div id="toc"><h3>Table of contents</h3><ul>
+<li><a href="#summary">Summary</a></li>
+<li><a href="#the-problem">The Problem</a></li>
+<li><a href="#the-plan">The Plan</a></li>
+<li><a href="#hasmock-instances"><code>HasMock</code> instances</a></li>
+<li><a href="#using-mock">Using <code>mock</code></a></li>
+<li><a href="#other-news">Other news</a></li>
+</ul></div>
+<section id="summary" class="level1">
+<h1>Summary</h1>
+<p>A couple of days ago, <em>marcushg</em> mentioned on the <strong>#servant</strong> IRC channel that one could probably easily use the information available from API types to “derive” a mock implementation of your request handlers that just generates random values of whatever the return type of the handlers are. Julian and I discussed this a bit today and I just went ahead and wrote down our thoughts in a new branch. The result will be explained in this post, but in short, it lets us take a type describing a web API, such as:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">API</span> <span class="fu">=</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] User</span></code></pre></div>
+<p>and generate request handlers that just respond with random values of the appropriate type, <code>User</code> in our case. In <em>servant</em>/<em>wai</em> terms, this means we get a <code>mock</code> function with the type:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="ot">mock ::</span> <span class="dt">HasMock</span> api <span class="ot">=&gt;</span> <span class="dt">Proxy</span> api <span class="ot">-&gt;</span> <span class="dt">Server</span> api</code></pre></div>
+<p>i.e., “given an API type, please generate a mock server for such an API”. This effectively means “please pull a mock server out of thin air for me”.</p>
+<p>Out of thin air, really? Not exactly. But let’s start by clearly stating the problem.</p>
+</section>
+<section id="the-problem" class="level1">
+<h1>The Problem</h1>
+<p><em>servant</em> lets you describe web applications with a Haskell type using the combinators from servant’s type-level EDSL. Such a type would be:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="co">-- In English:</span>
+<span class="co">-- the API has one endpoint, under /user, which returns</span>
+<span class="co">-- response bodies in JSON that describe values of type User</span>
+<span class="kw">type</span> <span class="dt">API</span> <span class="fu">=</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] User</span></code></pre></div>
+<p>where <code>User</code> could be defined as:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">newtype</span> <span class="dt">User</span> <span class="fu">=</span> <span class="dt">User</span> {<span class="ot"> username ::</span> <span class="dt">String</span> }</code></pre></div>
+<p>The goal would be to “automagically” derive a request handler of the right type that we could use as a placeholder until we properly implement a handler that talks to the database and responds with “the real data”.</p>
+<p>For anyone not familiar with <em>servant</em> already, you just need to know that it means we need to somehow automatically implement a computation with the type:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="ot">getUser ::</span> <span class="dt">EitherT</span> <span class="dt">ServantErr</span> <span class="dt">IO</span> <span class="dt">User</span></code></pre></div>
+<p>possibly by constraining the user to provide an instance for some random generation class.</p>
+</section>
+<section id="the-plan" class="level1">
+<h1>The Plan</h1>
+<p>Just like <em>servant-server</em>, <em>servant-client</em> and others, we need a class whose instances will define the way we interpret each combinator, in a way very specific to this task: we will produce what <em>servant-server</em> takes as input, i.e., request handlers! This all means we are basically looking at a class like:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">class</span> <span class="dt">HasServer</span> api <span class="ot">=&gt;</span> <span class="dt">HasMock</span> api <span class="kw">where</span>
+<span class="ot">  mock ::</span> <span class="dt">Proxy</span> api <span class="ot">-&gt;</span> <span class="dt">Server</span> api</code></pre></div>
+<p>where <code>Server api</code> just computes the types of the all the request handlers of an <em>API type</em>. In our case, <code>Server api</code> is computed as follows:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="co">-- api = the API type from above in our case</span>
+<span class="dt">Server</span> <span class="dt">API</span> <span class="fu">=</span> <span class="dt">Server</span> (<span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] User)</span>
+           <span class="co">-- static strings in the path do not influence</span>
+           <span class="co">-- the type of a handler</span>
+           <span class="fu">=</span> <span class="dt">Server</span> (<span class="dt">Get</span> <span class="ch">&#39;[JSON] User)</span>
+           <span class="co">-- EitherT ServantErr IO is the default monad</span>
+           <span class="co">-- in which handlers run</span>
+           <span class="fu">=</span> <span class="dt">Either</span> <span class="dt">ServantErr</span> <span class="dt">IO</span> <span class="dt">User</span></code></pre></div>
+<p>So we have to implement at least support for static string fragments in the path and the <code>Get</code> combinator (i.e handlers for HTTP GET requests).</p>
+</section>
+<section id="hasmock-instances" class="level1">
+<h1><code>HasMock</code> instances</h1>
+<p>Let’s start with the one for static path fragments, it’s the simplest one: we ignore the string bit and move on to what comes after.</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">instance</span> (<span class="dt">KnownSymbol</span> path, <span class="dt">HasMock</span> rest) <span class="ot">=&gt;</span> <span class="dt">HasMock</span> (path <span class="fu">:&gt;</span> rest) <span class="kw">where</span>
+  mock _ <span class="fu">=</span> mock (<span class="dt">Proxy</span><span class="ot"> ::</span> <span class="dt">Proxy</span> rest)</code></pre></div>
+<p>Don’t be scared by <code>KnownSymbol</code>, it basically just means “<code>path</code> is a type-level string”, that is, a string that appears in a type.</p>
+<p>Next comes the one for <code>Get</code>. This one is trickier: this is the combinator that says what type the handler returns. The returned value then gets encoded into JSON, HTML, CSV or any format of your choice. In our case, the handler returns a <code>User</code> and can only encode it in the JSON format.</p>
+<p>Now the heart of the matter really is: we know we need to return an <code>User</code> and our <code>EitherT ServantErr IO</code> monad mentions <code>IO</code>, couldn’t we randomly generate an <code>User</code>? Yes, we can! For the purpose of a mock server, we will simply use <a href="http://hackage.haskell.org/package/QuickCheck">QuickCheck</a>’s <code>Arbitrary</code> class, which represents types for which we can generate random values, given a random number generator.</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">class</span> <span class="dt">Arbitrary</span> a <span class="kw">where</span>
+<span class="ot">  arbitrary ::</span> <span class="dt">Gen</span> a
+  <span class="co">-- and another method, but optional</span></code></pre></div>
+<p>The <code>Gen</code> type provides instances for the <code>Functor</code>, <code>Applicative</code> and <code>Monad</code> classes and <code>Arbitrary</code> comes with instances for many of the types in <em>base</em>.</p>
+<p>This essentially means writing an <code>Arbitrary</code> instance for <code>User</code> is as simple as:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">instance</span> <span class="dt">Arbitrary</span> <span class="dt">User</span> <span class="kw">where</span>
+  <span class="co">-- we just rely on the arbitrary instance for lists of</span>
+  <span class="co">-- chars, i.e., Strings, and use the Functor instance for Gen</span>
+  arbitrary <span class="fu">=</span> fmap <span class="dt">User</span> arbitrary</code></pre></div>
+<p>If you have multiple fields, you can use the usual combo of <code>&lt;$&gt;</code> (i.e., <code>fmap</code>) and <code>&lt;*&gt;</code> (comes with <code>Applicative</code>).</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="co">-- a point: x, y coordinates</span>
+<span class="kw">data</span> <span class="dt">Point</span> <span class="fu">=</span> <span class="dt">Point</span> <span class="dt">Double</span> <span class="dt">Double</span>
+
+<span class="kw">instance</span> <span class="dt">Arbitrary</span> <span class="dt">Point</span> <span class="kw">where</span>
+  arbitrary <span class="fu">=</span> <span class="dt">Point</span> <span class="fu">&lt;$&gt;</span> arbitrary <span class="fu">&lt;*&gt;</span> arbitrary</code></pre></div>
+<p>Once you have an <code>Arbitrary</code> instance, in order to generate a random value using your instance, you have to call a function called… <code>generate</code>!</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="ot">generate ::</span> <span class="dt">Gen</span> a <span class="ot">-&gt;</span> <span class="dt">IO</span> a</code></pre></div>
+<p>Putting the two together, we get:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell">generate<span class="ot"> arbitrary ::</span> <span class="dt">Arbitrary</span> a <span class="ot">=&gt;</span> <span class="dt">IO</span> a</code></pre></div>
+<p>All we need to do is just “lift” that up into our <code>EitherT ServantErr IO</code> monad, which is exactly what <code>Control.Monad.IO.Class.liftIO</code> is about in the <a href="http://hackage.haskell.org/package/transformers">transformers</a> package.</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell">liftIO (generate arbitrary)<span class="ot"> ::</span> <span class="dt">Arbitrary</span> a <span class="ot">=&gt;</span> <span class="dt">EitherT</span> <span class="dt">ServantErr</span> <span class="dt">IO</span> a</code></pre></div>
+<p>In order to automatically “fill” request handlers with this expression we just need to write the <code>HasMock</code> instance for <code>Get</code>, shown below.</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">instance</span> (<span class="dt">Arbitrary</span> a, <span class="dt">AllCTRender</span> ctypes a) <span class="ot">=&gt;</span> <span class="dt">HasMock</span> (<span class="dt">Get</span> ctypes a) <span class="kw">where</span>
+  mock _ <span class="fu">=</span> liftIO (generate arbitrary)</code></pre></div>
+<p>The <code>AllCTRender</code> constraint just says “we know how to encode values of type <code>a</code> in the formats listed in the <code>Get</code> combinator”.</p>
+<p>And that’s it! You can now actually use all of this to put together a mock server for our little API.</p>
+</section>
+<section id="using-mock" class="level1">
+<h1>Using <code>mock</code></h1>
+<p>All we need to do to run the mock server is call <em>servant-server</em>’s <code>serve</code> function. It is illustrated below, along with <strong>all</strong> of the code you’d have to write if you were to use this mock-generation feature (aside from language pragmas and imports).</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="co">-- 1/ define our user type, deriving the Arbitrary instance</span>
+<span class="co">--    since it&#39;s just a newtype and we can use the</span>
+<span class="co">--    GeneralizedNewtypeDeriving extension. We also</span>
+<span class="co">--    derive the Generic class to get our JSON encoding</span>
+<span class="co">--    functions for free.</span>
+<span class="kw">newtype</span> <span class="dt">User</span> <span class="fu">=</span> <span class="dt">User</span> {<span class="ot"> username ::</span> <span class="dt">String</span> }
+  <span class="kw">deriving</span> (<span class="dt">Arbitrary</span>, <span class="dt">Generic</span>)
+
+<span class="co">-- 2/ we get the JSON encoding for free</span>
+<span class="kw">instance</span> <span class="dt">ToJSON</span> <span class="dt">Generic</span>
+
+<span class="co">-- 3/ recall our API type</span>
+<span class="kw">type</span> <span class="dt">API</span> <span class="fu">=</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] User</span>
+
+<span class="co">-- 4/ define this simple Proxy.</span>
+<span class="co">-- for any given type &#39;a&#39;, there&#39;s only one value of type &#39;Proxy a&#39;</span>
+<span class="co">-- that is not equivalent to error &quot;foo&quot; and the likes, a real honest value.</span>
+<span class="co">-- The way to build this value is to use the Proxy constructor.</span>
+<span class="co">-- In other words, this value lets us target one precise type. Servant</span>
+<span class="co">-- uses this to tie the type-level information with value-level data.</span>
+<span class="ot">api ::</span> <span class="dt">Proxy</span> <span class="dt">API</span>
+api <span class="fu">=</span> <span class="dt">Proxy</span>
+
+<span class="co">-- 5/ we magically derive the mock server.</span>
+<span class="co">-- the run function comes from the warp webserver,</span>
+<span class="co">-- http://hackage.haskell.org/package/warp</span>
+<span class="co">-- &#39;mock&#39; is the method of the `HasMock` class we&#39;ve</span>
+<span class="co">-- developed in this post.</span>
+<span class="co">-- This will run a mock web server with an endpoint at</span>
+<span class="co">-- http://localhost:8080/user that generates random values</span>
+<span class="co">-- of type User</span>
+<span class="ot">main ::</span> <span class="dt">IO</span> ()
+main <span class="fu">=</span> run <span class="dv">8080</span> (serve api <span class="fu">$</span> mock api)</code></pre></div>
+<p>Our little program in action:</p>
+<div class="sourceCode"><pre class="sourceCode bash"><code class="sourceCode bash">$ <span class="kw">curl</span> localhost:8080/user
+<span class="dt">{&quot;username&quot;:&quot;Yv\rG\u0014±Ssv\u001e&gt;\u001aVF\u001e\u000fM5ø\u000ctefÚJ\u0001K4&quot;}</span>
+<span class="co"># yes, a truly original username.</span></code></pre></div>
+<p>This is really all you have to do to put together a mock server for an API type. You can find the complete code for this in the work-in-progress <a href="https://github.com/haskell-servant/servant/tree/master/servant-mock">servant-mock</a> package on github. The example can be found under <code>example/main.hs</code> there.</p>
+<p>There are many more <code>HasMock</code> instances than the ones I have shown here of course – there’s one for all the combinators provided by the <em>servant</em> package! So you can take any API type out there and just create a mock server for it, as long as you provide <code>Arbitrary</code> instances for your data types. Nothing too interesting though, but feel free to take a look at <code>src/Servant/Mock.hs</code> in the repository if you want to read the other instances.</p>
+<p>I hope this makes clear how simple writing your own servant interpretation can be, and encourages you to try your hand at it!</p>
+</section>
+<section id="other-news" class="level1">
+<h1>Other news</h1>
+<ul>
+<li>I mentioned in <a href="https://haskell-servant.github.io/posts/2015-05-25-servant-paper-wgp-2015.html">a previous post</a> that we had submitted a paper for the <em>Workshop on Generic Programming</em>, co-located with ICFP’15, in Vancouver this year. Well, the paper has been accepted!</li>
+<li>Therefore, Julian Arni and/or Andres Löh will be giving a talk about servant there.</li>
+<li>In addition to this, Julian Arni recently gave a talk about servant at <a href="http://www.curry-on.org/">Curry-On!</a>. The video will be uploaded on <a href="https://www.youtube.com/channel/UC-WICcSW1k3HsScuXxDrp0w">their Youtube channel</a> in the upcoming days.</li>
+<li>I have submitted a very hands-on servant talk proposal for <a href="https://skillsmatter.com/conferences/7069-haskell-exchange-2015">the Haskell eXchange 2015</a> in London, and it has been accepted! See you there, folks.</li>
+</ul>
+</section>
+
+<div class="info">
+    Posted on July 24, 2015
+    
+        by Alp Mestanogullari
+    
+</div>
+]]></description>
+    <pubDate>Fri, 24 Jul 2015 00:00:00 UT</pubDate>
+    <guid>http://haskell-servant.github.io/posts/2015-07-24-pulling-mock-servers-out-of-thin-air.html</guid>
+    <dc:creator>servant developers</dc:creator>
+</item>
+<item>
+    <title>servant paper submitted to WGP 2015</title>
+    <link>http://haskell-servant.github.io/posts/2015-05-25-servant-paper-wgp-2015.html</link>
+    <description><![CDATA[<p>Sönke Hahn, Julian Arni, Andres Löh and myself have submitted a paper about <em>servant</em> to the <a href="http://www.wgp-sigplan.org/farmer/doku.php?id=2015">11th ACM SIGPLAN Workshop on Generic Programming</a>. Here’s the abstract.</p>
+<blockquote>
+<p>We describe the design and motivation for Servant, an extensible, type-level DSL for describing Web APIs. Servant APIs are Haskell types. An API type can be interpreted in several different ways: as a server that processes requests, interprets them and dispatches them to appropriate handlers; as a client that can correctly query the endpoints of the API; as systematic documentation for the API; and more. Servant is fully extensible: the API language can be augmented with new constructs, and new interpretations can be defined. The key Haskell features making all this possible are data kinds, (open) type families and (open) type classes. The techniques we use are reminiscent of general-purpose generic programming. However, where most generic programming libraries are interested in automatically deriving programs for a large class of datatypes from many different domains, we are only interested in a small class of datatypes that is used in the DSL for describing APIs.</p>
+</blockquote>
+<p>The full draft is available <a href="http://alpmestan.com/servant/servant-wgp.pdf">here</a>.</p>
+
+<div class="info">
+    Posted on May 25, 2015
+    
+        by Alp Mestanogullari
+    
+</div>
+]]></description>
+    <pubDate>Mon, 25 May 2015 00:00:00 UT</pubDate>
+    <guid>http://haskell-servant.github.io/posts/2015-05-25-servant-paper-wgp-2015.html</guid>
+    <dc:creator>servant developers</dc:creator>
+</item>
+<item>
+    <title>servant 0.4 released</title>
+    <link>http://haskell-servant.github.io/posts/2015-05-10-servant-0.4-released.html</link>
+    <description><![CDATA[<div id="toc"><h3>Table of contents</h3><ul>
+<li><a href="#multiple-content-type-support">Multiple content-type support</a></li>
+<li><a href="#servant-blaze-and-servant-lucid"><em>servant-blaze</em> and <em>servant-lucid</em></a></li>
+<li><a href="#response-headers">Response headers</a></li>
+<li><a href="#running-handlers-in-other-monads-than-eithert">Running handlers in other monads than <code>EitherT</code></a></li>
+<li><a href="#mklink">mkLink</a></li>
+<li><a href="#left">Left</a></li>
+<li><a href="#baseurl">BaseUrl</a></li>
+<li><a href="#complete-changelogs">Complete CHANGELOGs</a></li>
+<li><a href="#website">Website</a></li>
+<li><a href="#conclusions">Conclusions</a></li>
+</ul></div>
+<p>Since <a href="http://alpmestan.com/posts/2014-12-09-rethinking-webservices-apis-haskell.html">the last major release</a>, a lot happened in and around <em>servant</em>. Definitely enough to justify a new release. This post announces new releases of all the servant packages, with many local changes but also some major ones that affect all packages. You can find the detailed changelogs at the end of this post, but here are a few major features you may want to learn about. This website also features a <a href="/tutorial">new tutorial</a> that explains how to use <em>servant</em> from scratch.</p>
+<section id="multiple-content-type-support" class="level1">
+<h1>Multiple content-type support</h1>
+<p><em>servant</em> combinators are not JSON-centric anymore.</p>
+<p>If you had an API type like the following with servant <em>0.2.x</em>:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">API</span> <span class="fu">=</span> <span class="co">-- list users</span>
+           <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> [<span class="dt">User</span>]
+           <span class="co">-- update an user</span>
+      <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;username&quot;</span> <span class="dt">Text</span> <span class="fu">:&gt;</span> <span class="dt">ReqBody</span> <span class="dt">User</span> <span class="fu">:&gt;</span> <span class="dt">Put</span> ()</code></pre></div>
+<p>You now have to change it to:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">API</span> <span class="fu">=</span> <span class="co">-- list users</span>
+           <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] [User]</span>
+      <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;username&quot;</span> <span class="dt">Text</span> <span class="fu">:&gt;</span> <span class="dt">ReqBody</span> <span class="ch">&#39;[JSON] User :&gt; Put &#39;</span>[<span class="dt">JSON</span>] ()</code></pre></div>
+<p>Wherever applicable (i.e., <code>ReqBody</code> and all the combinators that correspond to an HTTP method), you can now specify all the content types in which you want to want to be able to encode/decode values. As you can see, we use the <code>DataKinds</code> GHC extension to let you specify a type-level list of content-types, which are simple dummy types:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">JSON</span></code></pre></div>
+<p>In <em>servant-server</em>, a list of these content-types as the first argument of a method gets translated into a set of constraints on the return type:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="dt">Get</span> <span class="ch">&#39;[JSON, PlainText] Int</span>
+<span class="fu">==&gt;</span>
+<span class="dt">MimeRender</span> <span class="dt">JSON</span> <span class="dt">Int</span>, <span class="dt">MimeRender</span> <span class="dt">PlainText</span> <span class="dt">Int</span> <span class="ot">=&gt;</span> <span class="dt">EitherT</span> <span class="dt">ServantErr</span> <span class="dt">IO</span> <span class="dt">Int</span></code></pre></div>
+<p>Which have unsurprising instances:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">instance</span> (<span class="dt">ToJSON</span> a) <span class="ot">=&gt;</span> <span class="dt">MimeRender</span> <span class="dt">JSON</span> a</code></pre></div>
+<p>Thus, <em>servant</em> checks at <em>compile-time</em> that it really can serialize your values as you describe. And of course, it handles picking the appropriate serialization format based on the request’s “Accept” header for you.</p>
+<p>(For <code>ReqBody</code>, <em>deserialization</em> is involved. For <em>servant-client</em>, the logic goes the other way around - serialization for <code>ReqBody</code>, deserialization for methods.)</p>
+</section>
+<section id="servant-blaze-and-servant-lucid" class="level1">
+<h1><em>servant-blaze</em> and <em>servant-lucid</em></h1>
+<p>Declaring new content-types, and the associated constraints for them, is quite easy. But to make it easier still, we are also announcing two new packages: servant-blaze and servant-lucid. To use them, just import their <code>HTML</code> datatype:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">import </span><span class="dt">Servant.HTML.Lucid</span> (<span class="dt">HTML</span>) <span class="co">-- or Servant.HTML.Blaze</span>
+
+<span class="kw">type</span> <span class="dt">MyHTML</span> <span class="fu">=</span> <span class="dt">Get</span> <span class="ch">&#39;[HTML] User</span></code></pre></div>
+<p>And <code>User</code> will be checked for the appropriate (e.g. <code>ToHtml</code>) instance.</p>
+</section>
+<section id="response-headers" class="level1">
+<h1>Response headers</h1>
+<p>There was no easy way so far to have handlers add headers to a response. We’ve since come up with a solution that stays true to the <em>servant</em> spirit: <em>what</em> headers your response will include (and what their types are) is still enforced statically:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">MyHandler</span> <span class="fu">=</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] (Headers &#39;</span>[<span class="dt">Header</span> <span class="st">&quot;Location&quot;</span> <span class="dt">Link</span>] <span class="dt">User</span>)
+
+<span class="ot">myHandler ::</span> <span class="dt">Server</span> <span class="dt">MyHandler</span>
+myHandler <span class="fu">=</span> return <span class="fu">$</span> addHeader <span class="fu">&lt;</span>someLink<span class="fu">&gt;</span> <span class="fu">$</span> <span class="fu">&lt;</span>someuser<span class="fu">&gt;</span></code></pre></div>
+<p><em>servant-docs</em> and <em>servant-client</em> are also response-header aware.</p>
+<p>Our current solution isn’t something we are entirely happy with from an internal persepctive. We use overlapping instances for all the handlers, which some might think is already a problem. But more concretely, there’s the threat of an exponential blowup in the number of instances we have to declare. And that can be a problem for end users too, if they decide to further modify behavior via a similar mechanism. But these things thankfully don’t seem to pose any <em>immediate</em> problems.</p>
+</section>
+<section id="running-handlers-in-other-monads-than-eithert" class="level1">
+<h1>Running handlers in other monads than <code>EitherT</code></h1>
+<p>An often-requested feature has been easy use of datatypes/monads besides <code>EitherT</code>. Now we believe we have a good story for that (thanks in large part to <a href="http://github.com/rschatz">rschatz</a>). To convert from one datatype to another, all you need to do is provide a natural transformation between them. For example:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">ReaderAPI</span> <span class="fu">=</span> <span class="st">&quot;a&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] Int</span>
+            <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;b&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON] String</span>
+
+<span class="ot">readerServerT ::</span> <span class="dt">ServerT</span> <span class="dt">ReaderAPI</span> (<span class="dt">Reader</span> <span class="dt">String</span>)
+readerServerT <span class="fu">=</span> return <span class="dv">1797</span> <span class="fu">:&lt;|&gt;</span> ask
+
+<span class="ot">readerServer ::</span> <span class="dt">Server</span> <span class="dt">ReaderAPI</span>
+readerServer <span class="fu">=</span> enter (<span class="dt">Nat</span> <span class="fu">$</span> return <span class="fu">.</span> (<span class="ot">`runReader`</span> <span class="st">&quot;hi&quot;</span>)) readerServerT</code></pre></div>
+<p>The new <code>ServerT</code> type synonym takes an extra paramer that represents what datatype/monad you are using over your handlers (instead of <code>EitherT ServantErr IO</code>).</p>
+<p>(Note that we also provide a number of pre-existing <code>Nat</code>s, which are an instance of <code>Category</code>. We could have used</p>
+<pre><code>readerServer = enter (generalizeNat . (runReaderTNat &quot;hi&quot;)) readerServerT</code></pre>
+<p>instead (with <code>.</code> being from <code>Control.Category</code>).)</p>
+<p>Note that the datatypes you can use now don’t even need to be monads!</p>
+</section>
+<section id="mklink" class="level1">
+<h1>mkLink</h1>
+<p>Somewhere between the 0.2 release and now, <code>mkLink</code> got a whole lot better (thanks Christian Marie!). <code>mkLink</code> makes urls that are statically guaranteed to belong to your API, without any Template Haskell. Combined with response headers, you can now easily create, for instance, type-safe redirect headers. Combined with the new HTML support, you can easily make links that you know will not 404.</p>
+</section>
+<section id="left" class="level1">
+<h1>Left</h1>
+<p>We also changed the default type of handlers from <code>EitherT (Int,String) IO a</code> to <code>EitherT ServantErr IO a</code>. Now it is possible to return headers and a response body in the <code>Left</code> case.</p>
+<p>We also now export function <code>errXXX</code> (where <code>XXX</code> is a 300-599 HTTP status code) with sensible reason strings.</p>
+</section>
+<section id="baseurl" class="level1">
+<h1>BaseUrl</h1>
+<p>We also changed the <code>client</code> function from <code>servant-client</code> so that, instead of returning various functions that each take a <code>BaseUrl</code> argument (often in inconvenient argument positions), the <code>client</code> function itself takes a <code>BaseUrl</code> argument, and the functions it returns don’t. So the type of <code>client</code> went from</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="ot">client ::</span> <span class="dt">HasClient</span> (<span class="dt">Canonicalize</span> layout) <span class="ot">=&gt;</span> <span class="dt">Proxy</span> layout <span class="ot">-&gt;</span> <span class="dt">Client</span> layout</code></pre></div>
+<p>To</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="ot">client ::</span> <span class="dt">HasClient</span> (<span class="dt">Canonicalize</span> layout) <span class="ot">=&gt;</span> <span class="dt">Proxy</span> layout <span class="ot">-&gt;</span> <span class="dt">BaseUrl</span> <span class="ot">-&gt;</span> <span class="dt">Client</span> layout</code></pre></div>
+</section>
+<section id="complete-changelogs" class="level1">
+<h1>Complete CHANGELOGs</h1>
+<ul>
+<li><a href="https://github.com/haskell-servant/servant/blob/b81ea9eee200803e764bc924302bb32d7fa81f0f/servant/CHANGELOG.md">servant</a></li>
+<li><a href="http://hackage.haskell.org/package/servant-server-0.4.0/changelog">servant-server</a></li>
+<li><a href="https://github.com/haskell-servant/servant/blob/b81ea9eee200803e764bc924302bb32d7fa81f0f/servant-client/CHANGELOG.md">servant-client</a></li>
+<li><a href="http://hackage.haskell.org/package/servant-docs-0.4.0/changelog">servant-docs</a></li>
+<li><a href="http://hackage.haskell.org/package/servant-jquery-0.4.0/changelog">servant-jquery</a></li>
+</ul>
+</section>
+<section id="website" class="level1">
+<h1>Website</h1>
+<p>We also decided to switch to hakyll in order to be able to have a blog as well as some static pages that collect tips and tricks that people have found. We also used this opportunity to rewrite the getting started into a more informative tutorial, now available <a href="/tutorial">here</a>.</p>
+</section>
+<section id="conclusions" class="level1">
+<h1>Conclusions</h1>
+<p>As you can see, more and more information is getting encoded statically - the types are becoming a pretty rich DSL. In order to keep the noise down, do what you normally do: abstract away common patterns! If your endpoints always return the same content-types, make aliases:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">Get&#39;</span> a <span class="fu">=</span> <span class="dt">Get</span> <span class="ch">&#39;[JSON, HTML, PlainText] a</span></code></pre></div>
+<p>There’s still an outstanding issue with the errors servant returns when a request doesn’t get handled. For example, if the path of a request, but not the method nor the request body, match, rather than returning a 405 (Method Not Allowed) we return a 400 (Bad Request), which is not the desired behavior. Andres Löh made some great suggestions for how to improve our routing time complexity, and hopefully we can integrate a fix for this issue when we tackle that.</p>
+<p>We also merged our repos into <a href="https://github.com/haskell-servant/servant">servant</a>. Please use that repo exclusively for PRs and issues (we’ll get rid of the others eventually).</p>
+<p>Special thanks to <a href="https://github.com/anchor">the Anchor team</a> from Australia, <a href="https://github.com/mpickering">Matthew Pickering</a>, <a href="https://github.com/dlarsson">Daniel Larsson</a>, <a href="https://github.com/paf31">Phil Freeman</a>, <a href="https://github.com/fisx">Matthias Fischmann</a>, <a href="https://github.com/rschatz">rschatz</a>, <a href="https://github.com/Fuuzetsu">Mateusz Kowalczyk</a>, <a href="https://github.com/codedmart">Brandon Martin</a> and <a href="https://github.com/spl">Sean Leather</a> who’ve contributed from little fixes to whole new features. Several companies are now running <em>servant</em>-powered web applications.</p>
+</section>
+
+<div class="info">
+    Posted on May 10, 2015
+    
+        by The servant team
+    
+</div>
+]]></description>
+    <pubDate>Sun, 10 May 2015 00:00:00 UT</pubDate>
+    <guid>http://haskell-servant.github.io/posts/2015-05-10-servant-0.4-released.html</guid>
+    <dc:creator>servant developers</dc:creator>
+</item>
+
+    </channel>
+</rss>

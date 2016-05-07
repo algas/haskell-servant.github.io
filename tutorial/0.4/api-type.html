@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>A web API as a type - haskell-servant</title>
+        <link rel="stylesheet" type="text/css" href="../../css/default.css" />
+    </head>
+    <body>
+        <div id="header">
+            <div id="logo">
+                <a href="../../">servant</a>
+            </div>
+            <div id="navigation">
+                <a href="../../">Home</a>
+                <a href="../../blog.html">Blog</a>
+                <a href="../../tutorial">Tutorial</a>
+                <a href="../../tips.html">Tips and tricks</a>
+                <a href="../../talks.html">Talks</a>
+                <a href="https://github.com/haskell-servant/servant">Github</a>
+            </div>
+        </div>
+
+        <div id="content">
+            <h1>A web API as a type</h1>
+
+            <div id="toc"><h3>Table of contents</h3><ul>
+<li><a href="#combinators">Combinators</a><ul>
+<li><a href="#static-strings">Static strings</a></li>
+<li><a href="#delete-get-patch-post-and-put"><code>Delete</code>, <code>Get</code>, <code>Patch</code>, <code>Post</code> and <code>Put</code></a></li>
+<li><a href="#capture"><code>Capture</code></a></li>
+<li><a href="#queryparam-queryparams-queryflag-matrixparam-matrixparams-and-matrixflag"><code>QueryParam</code>, <code>QueryParams</code>, <code>QueryFlag</code>, <code>MatrixParam</code>, <code>MatrixParams</code> and <code>MatrixFlag</code></a></li>
+<li><a href="#reqbody"><code>ReqBody</code></a></li>
+<li><a href="#request-headers">Request <code>Header</code>s</a></li>
+<li><a href="#content-types">Content types</a></li>
+<li><a href="#response-headers">Response <code>Headers</code></a></li>
+<li><a href="#interoperability-with-other-wai-applications-raw">Interoperability with other WAI <code>Application</code>s: <code>Raw</code></a></li>
+</ul></li>
+</ul></div>
+<p>この章のソースは literate haskell file です。 まずいくつかの言語拡張と import を導入します。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">{-# LANGUAGE DataKinds #-}</span>
+<span class="ot">{-# LANGUAGE TypeOperators #-}</span>
+
+<span class="kw">module</span> <span class="dt">ApiType</span> <span class="kw">where</span>
+
+<span class="kw">import </span><span class="dt">Data.Text</span>
+<span class="kw">import </span><span class="dt">Servant.API</span></code></pre></div>
+<p>Consider the following informal specification of an API:</p>
+<p>以下のように大雑把にAPIの仕様を考えてみましょう。</p>
+<blockquote>
+<p><code>/users</code> というエンドポイントは <code>age</code> や <code>name</code> などの値を持つ <code>sortby</code> クエリ文字列を受け取り、<code>age</code>, <code>name</code>, <code>email</code>, <code>registration_date</code> といった ユーザ情報を持つJSONオブジェクトの一覧を返します。</p>
+</blockquote>
+<p>これを形式化してみましょう。形式化されたAPIからウェブアプリを書くための多くの手段を得られます。 他にもクライアントライブラリやドキュメントを書く手段にもなります。</p>
+<p>それでは sevant を使ってどのようにAPIを記述すれば良いのでしょうか？ 前述のとおりエンドポイントを書くには古き良き Haskell の <strong>型</strong> を使います。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">QueryParam</span> <span class="st">&quot;sortby&quot;</span> <span class="dt">SortBy</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span>
+
+<span class="kw">data</span> <span class="dt">SortBy</span> <span class="fu">=</span> <span class="dt">Age</span> <span class="fu">|</span> <span class="dt">Name</span>
+
+<span class="kw">data</span> <span class="dt">User</span> <span class="fu">=</span> <span class="dt">User</span> {
+<span class="ot">  name ::</span> <span class="dt">String</span>,
+<span class="ot">  age ::</span> <span class="dt">Int</span>
+}</code></pre></div>
+<p>上記を掘り下げてみましょう:</p>
+<ul>
+<li><code>&quot;users&quot;</code> は <code>/users</code> でアクセスできるエンドポイントを表しています。</li>
+<li><code>QueryParam &quot;sortby&quot; SortBy</code> は <code>sortby</code> クエリ文字列パラメータを持つ エンドポイントであり、<code>SortBy</code> 型の値を持つことが期待されます。 <code>SortBy</code> は <code>data SortBy = Age | Name</code> のように定義されます。</li>
+<li><code>Get '[JSON] [User]</code> は HTTP GET リクエストを通じてアクセスできる、 JSONとしてUserのリストを返すようなエンドポイントであることを示しています。 異なるフォーマットでデータを使えるようにする方法は後ほど登場します。それは クライアントのリクエスト内でどの <a href="http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html">Accept header</a> を選ぶかで決まります。</li>
+<li><code>:&gt;</code> 演算子は様々な「結合子」を分離します。static path や URL capture など。 static path や URL capture の場合だけ、その順序に意味があります。 <code>&quot;users&quot; :&gt; &quot;list-all&quot; :&gt; Get '[JSON] [User]</code> は <code>/users/list-all</code> と同じで、 <code>&quot;list-all&quot; :&gt; &quot;users&quot; :&gt; Get '[JSON] [User]</code> とは異なります。 <code>:&gt;</code> は <code>/</code> と等価な場合もありますが、必ずしもそうではないこともあります。</li>
+</ul>
+<p>複数のエンドポイントを持つAPIを <code>:&lt;|&gt;</code> 結合子を使って記述できます。 以下に一例を示します：</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI2</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="st">&quot;list-all&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span>
+           <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;list-all&quot;</span> <span class="fu">:&gt;</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span></code></pre></div>
+<p><em>servant</em> は多数の（out-of-the-box?）結合子を取り扱えますが、必要なだけ自分で書かなければ なりません。servant で扱えるすべての結合子の概要を以下にまとめました。</p>
+<section id="combinators" class="level1">
+<h1>Combinators</h1>
+<section id="static-strings" class="level2">
+<h2>Static strings</h2>
+<p>これまでに見てきた通り、static path を記述するのに型レベル文字列を使用できます。 (ただし、<code>DataKinds</code> 言語拡張を導入する必要があります。) URL を書くには文字列を <code>/</code> で句切れば良いのです。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI3</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="st">&quot;list-all&quot;</span> <span class="fu">:&gt;</span> <span class="st">&quot;now&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span>
+              <span class="co">-- これでアクセスできるエンドポイントは以下のようになります:</span>
+              <span class="co">-- /users/list-all/now</span></code></pre></div>
+</section>
+<section id="delete-get-patch-post-and-put" class="level2">
+<h2><code>Delete</code>, <code>Get</code>, <code>Patch</code>, <code>Post</code> and <code>Put</code></h2>
+<p>これら5つの結合子は非常に似ていますが、HTTPメソッドが異なります。 以下のように定義されています。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Delete</span> (<span class="ot">contentTypes ::</span> [<span class="fu">*</span>]) a
+<span class="kw">data</span> <span class="dt">Get</span> (<span class="ot">contentTypes ::</span> [<span class="fu">*</span>]) a
+<span class="kw">data</span> <span class="dt">Patch</span> (<span class="ot">contentTypes ::</span> [<span class="fu">*</span>]) a
+<span class="kw">data</span> <span class="dt">Post</span> (<span class="ot">contentTypes ::</span> [<span class="fu">*</span>]) a
+<span class="kw">data</span> <span class="dt">Put</span> (<span class="ot">contentTypes ::</span> [<span class="fu">*</span>]) a</code></pre></div>
+<p>エンドポイントは(自作しないかぎり)上記の5つの結合子のうちの1つで終わります。 例:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI4</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span>
+           <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;admins&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span></code></pre></div>
+</section>
+<section id="capture" class="level2">
+<h2><code>Capture</code></h2>
+<p>URLの一部であるURLキャプチャは変数で、その実際の値は取得されてからリクエストハンドラに渡されます。 多くのウェブフレームワークでは <code>/users/:userid</code> のように書かれ、<code>:</code> のついた <code>userid</code> が変数名 またはプレースホルダです。例えば、もし <code>userid</code> が1以上の整数の範囲に収まるの場合には、そのエンド ポイントは <code>/users/1</code> とか <code>/users/143</code> とかになります。</p>
+<p>Servant における <code>Capture</code> 結合子は変数名と型で表される(型レベル)文字列で、取得したい値の 型を示しています。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Capture</span> (<span class="ot">s ::</span> <span class="dt">Symbol</span>) a
+<span class="co">-- s :: シンボル 's' は型レベル文字列</span></code></pre></div>
+<p>キャプチャに正規表現を使っているウェブフレームワークもあります。 Servant は <a href="https://hackage.haskell.org/package/servant/docs/Servant-Common-Text.html#t:FromText"><code>FromText</code></a> クラスを使っていて、取得された値はそのインスタンスになっていなければなりません。</p>
+<p>例:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI5</span> <span class="fu">=</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;userid&quot;</span> <span class="dt">Integer</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] User</span>
+                <span class="co">-- 'GET /user/:userid' と等価</span>
+                <span class="co">-- ただし servant では &quot;userid&quot; が Integer であることを明示している</span>
+
+           <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;user&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;userid&quot;</span> <span class="dt">Integer</span> <span class="fu">:&gt;</span> <span class="dt">Delete</span> <span class="ch">'[] ()</span>
+                <span class="co">-- 'DELETE /user/:userid' と等価</span></code></pre></div>
+</section>
+<section id="queryparam-queryparams-queryflag-matrixparam-matrixparams-and-matrixflag" class="level2">
+<h2><code>QueryParam</code>, <code>QueryParams</code>, <code>QueryFlag</code>, <code>MatrixParam</code>, <code>MatrixParams</code> and <code>MatrixFlag</code></h2>
+<p><code>QueryParam</code> や <code>QueryParams</code>, <code>QueryFlag</code> はクエリ文字列パラメータです。 これらのパラメータは URL 内の (<code>?</code>) の後に置かれます。 例えば、<code>/users?sortby=age</code> の <code>sortby</code> のようなもので <code>age</code> という値を取ります。 <code>QueryParams</code> はクエリパラメータが値のリストであることを表していて、 <code>?param[]=value1&amp;param[]=value2</code> のように書かれます。 <code>QueryFlag</code> は論理値のようなクエリパラメータに用いられ、値を持つ必要はありません。 クエリ文字列の中でパラメータ名があるかないかで、パラメータの値が <code>True</code> か <code>False</code> であるかを決定します。例えば、<code>/users?active</code> はすべての <code>/users</code> のうち、 アクティブなユーザの一覧のみを表します。</p>
+<p>以下に対応するデータ型の定義を示します:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">QueryParam</span> (<span class="ot">sym ::</span> <span class="dt">Symbol</span>) a
+<span class="kw">data</span> <span class="dt">QueryParams</span> (<span class="ot">sym ::</span> <span class="dt">Symbol</span>) a
+<span class="kw">data</span> <span class="dt">QueryFlag</span> (<span class="ot">sym ::</span> <span class="dt">Symbol</span>)</code></pre></div>
+<p><a href="http://www.w3.org/DesignIssues/MatrixURIs.html">Matrix parameters</a> はクエリ文字列パラメータに近いものですが、パスの至るところに出てきます。 matrixパラメータのURLは <code>/users;sortby=age</code> のようになり、 クエリ文字列パラメータでは <code>/users?sortby=age</code> のように書けます。 このパラメータのいいところは、URLの最後に持ってくる必要がないことです。 2015/01/01 以降に登録したアクティブユーザの位置データを取得するには、 <code>/users;active=true;registered_after=2005-01-01/locations</code> のように書きます。</p>
+<p>対応するデータ型定義は以下のとおりです:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">MatrixParam</span> (<span class="ot">sym ::</span> <span class="dt">Symbol</span>) a
+<span class="kw">data</span> <span class="dt">MatrixParams</span> (<span class="ot">sym ::</span> <span class="dt">Symbol</span>) a
+<span class="kw">data</span> <span class="dt">MatrixFlag</span> (<span class="ot">sym ::</span> <span class="dt">Symbol</span>)</code></pre></div>
+<p>例:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI6</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">QueryParam</span> <span class="st">&quot;sortby&quot;</span> <span class="dt">SortBy</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span>
+                <span class="co">-- 'GET /users?sortby={age, name}' と同じ</span>
+
+           <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">MatrixParam</span> <span class="st">&quot;sortby&quot;</span> <span class="dt">SortBy</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span>
+                <span class="co">-- 'GET /users;sortby={age, name}' と同じ</span></code></pre></div>
+<p>繰り返しになりますが、ハンドラが <code>SortBy</code> のようなものを処理する必要はありません。 <em>Servant</em> が面倒を見てくれます。</p>
+</section>
+<section id="reqbody" class="level2">
+<h2><code>ReqBody</code></h2>
+<p>個々のHTTPリクエストは使用可能なサーバについてのデータを <em>body</em> に持つことができ、 そのデータは(サーバが理解する長さで)任意のフォーマットにエンコードできます。 それは新しいユーザを作成するのに使うエンドポイントなどで使われます。 分離したクエリ文字列パラメータみたいな汚い書式でユーザの個々のフィールドを得る 代わりに、すべてのデータをJSONオブジェクトに入れてしまうことができます。 この利点はネストされたオブジェクトを扱えることです。</p>
+<p><em>Servant</em> の <code>ReqBody</code> 結合子は content-type のリストを持ち、エンコードされた そのデータとデータ型はリクエストボディに書かれます。気づいたかもしれませんが、 content-type ヘッダーをチェックする必要はなく、自前で処理する必要もありません。 servant が面倒をみます。そして必要に応じて <code>Bad Request</code> や <code>Unsupported Content Type</code> を返します。</p>
+<p>以下はデータ型の定義です:</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">ReqBody</span> (<span class="ot">contentTypes ::</span> [<span class="fu">*</span>]) a</code></pre></div>
+<p>例:</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI7</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">ReqBody</span> <span class="ch">'[JSON] User :&gt; Post '</span>[<span class="dt">JSON</span>] <span class="dt">User</span>
+                <span class="co">-- - equivalent to 'POST /users' with a JSON object</span>
+                <span class="co">--   describing a User in the request body</span>
+                <span class="co">-- - returns a User encoded in JSON</span>
+
+           <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;userid&quot;</span> <span class="dt">Integer</span>
+                        <span class="fu">:&gt;</span> <span class="dt">ReqBody</span> <span class="ch">'[JSON] User</span>
+                        <span class="fu">:&gt;</span> <span class="dt">Put</span> <span class="ch">'[JSON] User</span>
+                <span class="co">-- - equivalent to 'PUT /users/:userid' with a JSON</span>
+                <span class="co">--   object describing a User in the request body</span>
+                <span class="co">-- - returns a User encoded in JSON</span></code></pre></div>
+</section>
+<section id="request-headers" class="level2">
+<h2>Request <code>Header</code>s</h2>
+<p>リクエストヘッダはキャッシュから認証データの受け渡しまで様々な用途に使われます。リクエスト ヘッダはヘッダ名とその値を持ちます。例えば、<code>Accept: application/json</code> のように書き ます。</p>
+<p>Servant の <code>Header</code> 結合子はヘッダ名とその型を型レベル文字列で表します。型は(何らかの 文字表現から変換される)ヘッダ値の型で、以下のように書けます。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Header</span> (<span class="ot">sym ::</span> <span class="dt">Symbol</span>) a</code></pre></div>
+<p>以下の例は <code>User-Agent</code> を使ったエンドポイントを表しています。リクエストを送信する クライアントが使うソフトウェアまたはライブラリの名前を示します。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI8</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Header</span> <span class="st">&quot;User-Agent&quot;</span> <span class="dt">Text</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span></code></pre></div>
+</section>
+<section id="content-types" class="level2">
+<h2>Content types</h2>
+<p>これまでは content-type のリストを扱う結合子として常に <code>'[JSON]</code> を使ってきました。 しかし <em>servant</em> は他にも content-type を使えますし、自前の content-type を定義する こともできます。</p>
+<p><em>Servant</em> パッケージはすぐに使える4つの content-type を用意しています。 <code>JSON</code>, <code>PlainText</code>, <code>FormUrlEncoded</code>, <code>OctetStream</code> です。 もし良く分からない理由で4つのフォーマットを使ってユーザデータを扱えるエンドポイントが必要に なった場合には、以下のように API を書きます。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI9</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON, PlainText, FormUrlEncoded, OctetStream] [User]</span></code></pre></div>
+<p>HTML の content-type も提供されていますが、誰もが使う1つのライブラリとしては提供して いません。データを HTML にエンコードするために <em>servant-lucid</em> と <em>servant-blaze</em> という2つのパッケージが用意されています。</p>
+<p>content-type と独自のデータ型を一緒に扱う方法は <a href="../../tutorial/server.html">section about serving an API</a> で紹介します。</p>
+</section>
+<section id="response-headers" class="level2">
+<h2>Response <code>Headers</code></h2>
+<p>HTTPリクエストと同じく、ウェブサーバに作られたレスポンスもヘッダを載せることができます。 <em>servant</em> は <code>Header</code> のリストを渡す <code>Headers</code> 結合子を持ち、“return type” を 単純にラップするエンドポイントによって使われます</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Headers</span> (<span class="ot">ls ::</span> [<span class="fu">*</span>]) a</code></pre></div>
+<p>レスポンスが “User-Count” ヘッダを返すようなエンドポイントは、以下のように書けます。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI10</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] (Headers '</span>[<span class="dt">Header</span> <span class="st">&quot;User-Count&quot;</span> <span class="dt">Integer</span>] [<span class="dt">User</span>])</code></pre></div>
+</section>
+<section id="interoperability-with-other-wai-applications-raw" class="level2">
+<h2>Interoperability with other WAI <code>Application</code>s: <code>Raw</code></h2>
+<p>最後に紹介するのは <code>Raw</code> 結合子で、以下の2つの理由で使用されます。</p>
+<ul>
+<li>静的なファイルを使いたい場合には、以下のように書きます。</li>
+</ul>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">UserAPI11</span> <span class="fu">=</span> <span class="st">&quot;users&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] [User]</span>
+                 <span class="co">-- /users エンドポイント</span>
+
+            <span class="fu">:&lt;|&gt;</span> <span class="dt">Raw</span>
+                 <span class="co">-- /users 以外のリクエストはここにきます。</span>
+                 <span class="co">-- 正しいパス名とファイル名を指定すれば表示されます。</span></code></pre></div>
+<ul>
+<li><p>You more generally want to plug a <a href="http://hackage.haskell.org/package/wai">WAI <code>Application</code></a> into your webservice. Static file serving is a specific example of that. The API type would look the same as above though. (You can even combine <em>servant</em> with other web frameworks this way!)</p></li>
+<li><p>より一般的な使い方としてはウェブサービスに <a href="http://hackage.haskell.org/package/wai">WAI <code>Application</code></a> を取り入れる方法があります。静的なファイルを表示する方法が書いてあります。APIの場合と同じように見えます。 (この方法で <em>servant</em> と他のウェブフレームワークを組み合わせることもできます。)</p></li>
+</ul>
+<div style="text-align: center;">
+<p><a href="../../tutorial/server.html">Next page: Serving an API</a></p>
+</div>
+</section>
+</section>
+
+        </div>
+        <div id="footer">
+            Site proudly generated by
+            <a href="http://jaspervdj.be/hakyll">Hakyll</a>
+            -
+            <a href="https://github.com/haskell-servant/haskell-servant.github.io">Source</a>
+        </div>
+    </body>
+</html>

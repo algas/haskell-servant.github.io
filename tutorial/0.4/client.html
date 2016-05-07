@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Deriving Haskell functions to query an API - haskell-servant</title>
+        <link rel="stylesheet" type="text/css" href="../../css/default.css" />
+    </head>
+    <body>
+        <div id="header">
+            <div id="logo">
+                <a href="../../">servant</a>
+            </div>
+            <div id="navigation">
+                <a href="../../">Home</a>
+                <a href="../../blog.html">Blog</a>
+                <a href="../../tutorial">Tutorial</a>
+                <a href="../../tips.html">Tips and tricks</a>
+                <a href="../../talks.html">Talks</a>
+                <a href="https://github.com/haskell-servant/servant">Github</a>
+            </div>
+        </div>
+
+        <div id="content">
+            <h1>Deriving Haskell functions to query an API</h1>
+
+            
+<p>API をサーブするハンドラを定義するには数多くのことをやらなければならないが、APIにクエリを投げるのがよりシンプルで、 ウェブサーバの中で何が起こっているのかを気にしません。Webサーバとやり取りする方法とレスポンスの受け取り型を知っている だけで良いのです。ただし、APIの構造がリッチではなく大量のクライアント側の関数を生成するために調査させることはないので、普通は手でクエリ関数を書かなければならないことはあります。</p>
+<p>しかし <em>servant</em> は API を調査する方法を持っています。API はただの Haskell 型で Haskell は型でできることがたくさんあるからです。ハンドラが持つべき型を推測するような API を見つけるのと同様の方法で、 <code>Capture</code>, <code>ReqBody</code>, <code>QueryParam</code> などのように1つの引数を持つ Haskell の関数を <em>derive</em> する API の構造を推測できます。<em>derive</em> によって複雑なコード生成は不要になり、関数は API type の構造だけで定義されます。</p>
+<p>この章のソースは literate haskell file として書かれています。 まず、言語拡張と import が必要です。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">{-# LANGUAGE DataKinds #-}</span>
+<span class="ot">{-# LANGUAGE DeriveGeneric #-}</span>
+<span class="ot">{-# LANGUAGE TypeOperators #-}</span>
+
+<span class="kw">module</span> <span class="dt">Client</span> <span class="kw">where</span>
+
+<span class="kw">import </span><span class="dt">Control.Monad.Trans.Either</span>
+<span class="kw">import </span><span class="dt">Data.Aeson</span>
+<span class="kw">import </span><span class="dt">Data.Proxy</span>
+<span class="kw">import </span><span class="dt">GHC.Generics</span>
+<span class="kw">import </span><span class="dt">Servant.API</span>
+<span class="kw">import </span><span class="dt">Servant.Client</span></code></pre></div>
+<p>次はドメインを特定するデータ型です。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">data</span> <span class="dt">Position</span> <span class="fu">=</span> <span class="dt">Position</span>
+  {<span class="ot"> x ::</span> <span class="dt">Int</span>
+  ,<span class="ot"> y ::</span> <span class="dt">Int</span>
+  } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Generic</span>)
+
+<span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">Position</span>
+
+<span class="kw">newtype</span> <span class="dt">HelloMessage</span> <span class="fu">=</span> <span class="dt">HelloMessage</span> {<span class="ot"> msg ::</span> <span class="dt">String</span> }
+  <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Generic</span>)
+
+<span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">HelloMessage</span>
+
+<span class="kw">data</span> <span class="dt">ClientInfo</span> <span class="fu">=</span> <span class="dt">ClientInfo</span>
+  {<span class="ot"> clientName ::</span> <span class="dt">String</span>
+  ,<span class="ot"> clientEmail ::</span> <span class="dt">String</span>
+  ,<span class="ot"> clientAge ::</span> <span class="dt">Int</span>
+  ,<span class="ot"> clientInterestedIn ::</span> [<span class="dt">String</span>]
+  } <span class="kw">deriving</span> <span class="dt">Generic</span>
+
+<span class="kw">instance</span> <span class="dt">ToJSON</span> <span class="dt">ClientInfo</span>
+
+<span class="kw">data</span> <span class="dt">Email</span> <span class="fu">=</span> <span class="dt">Email</span>
+  {<span class="ot"> from ::</span> <span class="dt">String</span>
+  ,<span class="ot"> to ::</span> <span class="dt">String</span>
+  ,<span class="ot"> subject ::</span> <span class="dt">String</span>
+  ,<span class="ot"> body ::</span> <span class="dt">String</span>
+  } <span class="kw">deriving</span> (<span class="dt">Show</span>, <span class="dt">Generic</span>)
+
+<span class="kw">instance</span> <span class="dt">FromJSON</span> <span class="dt">Email</span></code></pre></div>
+<p>本題に入ります。前章をふまえて次のような API type を考えてみましょう。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="kw">type</span> <span class="dt">API</span> <span class="fu">=</span> <span class="st">&quot;position&quot;</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;x&quot;</span> <span class="dt">Int</span> <span class="fu">:&gt;</span> <span class="dt">Capture</span> <span class="st">&quot;y&quot;</span> <span class="dt">Int</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] Position</span>
+      <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;hello&quot;</span> <span class="fu">:&gt;</span> <span class="dt">QueryParam</span> <span class="st">&quot;name&quot;</span> <span class="dt">String</span> <span class="fu">:&gt;</span> <span class="dt">Get</span> <span class="ch">'[JSON] HelloMessage</span>
+      <span class="fu">:&lt;|&gt;</span> <span class="st">&quot;marketing&quot;</span> <span class="fu">:&gt;</span> <span class="dt">ReqBody</span> <span class="ch">'[JSON] ClientInfo :&gt; Post '</span>[<span class="dt">JSON</span>] <span class="dt">Email</span></code></pre></div>
+<p><em>servant-client</em> で得ようとしている3つの関数を示します。 それぞれがエンドポイントにクエリを投げます。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">position ::</span> <span class="dt">Int</span> <span class="co">-- ^ value for &quot;x&quot;</span>
+         <span class="ot">-&gt;</span> <span class="dt">Int</span> <span class="co">-- ^ value for &quot;y&quot;</span>
+         <span class="ot">-&gt;</span> <span class="dt">EitherT</span> <span class="dt">ServantError</span> <span class="dt">IO</span> <span class="dt">Position</span>
+
+<span class="ot">hello ::</span> <span class="dt">Maybe</span> <span class="dt">String</span> <span class="co">-- ^ an optional value for &quot;name&quot;</span>
+      <span class="ot">-&gt;</span> <span class="dt">EitherT</span> <span class="dt">ServantError</span> <span class="dt">IO</span> <span class="dt">HelloMessage</span>
+
+<span class="ot">marketing ::</span> <span class="dt">ClientInfo</span> <span class="co">-- ^ value for the request body</span>
+          <span class="ot">-&gt;</span> <span class="dt">EitherT</span> <span class="dt">ServantError</span> <span class="dt">IO</span> <span class="dt">Email</span></code></pre></div>
+<p>関数はそれぞれ、レスポンスが依存する任意の値の引数として、API type を確かにするものとして使うことができます。 それではどのようにしてこれらの関数を書けばよいのでしょうか。実は <code>Proxy</code> を API とリクエストを送るホストに 与えれば良いのです。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">api ::</span> <span class="dt">Proxy</span> <span class="dt">API</span>
+api <span class="fu">=</span> <span class="dt">Proxy</span>
+
+position <span class="fu">:&lt;|&gt;</span> hello <span class="fu">:&lt;|&gt;</span> marketing <span class="fu">=</span> client api (<span class="dt">BaseUrl</span> <span class="dt">Http</span> <span class="st">&quot;localhost&quot;</span> <span class="dv">8081</span>)</code></pre></div>
+<p>上記のコードを見ると、これらの関数のパターンマッチになっていることが分かります。もしAPI内にあるエンドポイントよりも 多いまたは少ない関数を導こうとすると、明らかにエラーになります。<code>BaseUrl</code> の値は次のようになります。</p>
+<div class="sourceCode"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span class="co">-- | URI scheme to use</span>
+<span class="kw">data</span> <span class="dt">Scheme</span> <span class="fu">=</span>
+    <span class="dt">Http</span>  <span class="co">-- ^ http://</span>
+  <span class="fu">|</span> <span class="dt">Https</span> <span class="co">-- ^ https://</span>
+  <span class="kw">deriving</span>
+
+<span class="co">-- | Simple data type to represent the target of HTTP requests</span>
+<span class="co">--   for servant's automatically-generated clients.</span>
+<span class="kw">data</span> <span class="dt">BaseUrl</span> <span class="fu">=</span> <span class="dt">BaseUrl</span>
+  {<span class="ot"> baseUrlScheme ::</span> <span class="dt">Scheme</span> <span class="co">-- ^ URI scheme to use</span>
+  ,<span class="ot"> baseUrlHost ::</span> <span class="dt">String</span>   <span class="co">-- ^ host (eg &quot;haskell.org&quot;)</span>
+  ,<span class="ot"> baseUrlPort ::</span> <span class="dt">Int</span>      <span class="co">-- ^ port (eg 80)</span>
+  }</code></pre></div>
+<p>できました。クライアントの関数を使うコードを書いてみましょう。</p>
+<div class="sourceCode"><pre class="sourceCode literate haskell"><code class="sourceCode haskell"><span class="ot">queries ::</span> <span class="dt">EitherT</span> <span class="dt">ServantError</span> <span class="dt">IO</span> (<span class="dt">Position</span>, <span class="dt">HelloMessage</span>, <span class="dt">Email</span>)
+queries <span class="fu">=</span> <span class="kw">do</span>
+  pos <span class="ot">&lt;-</span> position <span class="dv">10</span> <span class="dv">10</span>
+  msg <span class="ot">&lt;-</span> hello (<span class="dt">Just</span> <span class="st">&quot;servant&quot;</span>)
+  em  <span class="ot">&lt;-</span> marketing (<span class="dt">ClientInfo</span> <span class="st">&quot;Alp&quot;</span> <span class="st">&quot;alp@foo.com&quot;</span> <span class="dv">26</span> [<span class="st">&quot;haskell&quot;</span>, <span class="st">&quot;mathematics&quot;</span>])
+  return (pos, msg, em)
+
+<span class="ot">run ::</span> <span class="dt">IO</span> ()
+run <span class="fu">=</span> <span class="kw">do</span>
+  res <span class="ot">&lt;-</span> runEitherT queries
+  <span class="kw">case</span> res <span class="kw">of</span>
+    <span class="dt">Left</span> err <span class="ot">-&gt;</span> putStrLn <span class="fu">$</span> <span class="st">&quot;Error: &quot;</span> <span class="fu">++</span> show err
+    <span class="dt">Right</span> (pos, msg, em) <span class="ot">-&gt;</span> <span class="kw">do</span>
+      print pos
+      print msg
+      print em</code></pre></div>
+<p><code>dist/build/tutorial/tutorial 8</code> でサーバを動かせます。 クライアントは <code>dist/build/t8-main/t8-main</code> で動きます。</p>
+<div class="sourceCode"><pre class="sourceCode bash"><code class="sourceCode bash"> $ <span class="kw">dist/build/tutorial/tutorial</span> 8
+ <span class="co"># and in another terminal:</span>
+ $ <span class="kw">dist/build/t8-main/t8-main</span>
+ <span class="kw">Position</span> {x = 10, y = 10}
+ <span class="kw">HelloMessage</span> {msg = <span class="st">&quot;Hello, servant&quot;</span>}
+ <span class="kw">Email</span> {from = <span class="st">&quot;great@company.com&quot;</span>, to = <span class="st">&quot;alp@foo.com&quot;</span>, subject = <span class="st">&quot;Hey Alp, we miss you!&quot;</span>, body = <span class="st">&quot;Hi Alp,\n\nSince you've recently turned 26, have you checked out our latest haskell, mathematics products? Give us a visit!&quot;</span>}</code></pre></div>
+<p>関数の引数の型は(サーバ側の)リクエストハンドラと同じです。以上が <em>servant-client</em> の使い方です！</p>
+<div style="text-align: center;">
+<p>
+<a href="../../tutorial/server.html">Previous page: Serving an API</a>
+</p>
+<p>
+<a href="../../tutorial/javascript.html">Next page: Generating javascript functions to query an API</a>
+</p>
+</div>
+
+        </div>
+        <div id="footer">
+            Site proudly generated by
+            <a href="http://jaspervdj.be/hakyll">Hakyll</a>
+            -
+            <a href="https://github.com/haskell-servant/haskell-servant.github.io">Source</a>
+        </div>
+    </body>
+</html>
